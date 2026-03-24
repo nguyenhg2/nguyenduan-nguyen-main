@@ -389,7 +389,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
     return () => clearInterval(id)
   }, [])
 
-  useEffect(() => {
+    useEffect(() => {
     if (!stationLocation) {
       setRouteLines({})
       return
@@ -406,6 +406,28 @@ function CompanyPortal({ user }: CompanyPortalProps) {
       return
     }
     const controller = new AbortController()
+
+    const fetchOneRoute = async (
+      routerUrl: string,
+      lng1: number,
+      lat1: number,
+      lng2: number,
+      lat2: number,
+      signal: AbortSignal
+    ): Promise<[number, number][] | null> => {
+      const url =
+        `${routerUrl}/route/v1/driving/` +
+        `${lng1},${lat1};${lng2},${lat2}` +
+        `?overview=full&geometries=geojson`
+      const res = await fetch(url, { signal })
+      if (!res.ok) return null
+      const data = await res.json()
+      if (data.code !== 'Ok') return null
+      const coords = data.routes?.[0]?.geometry?.coordinates
+      if (!coords || coords.length < 2) return null
+      return coords.map(([cLng, cLat]: [number, number]) => [cLat, cLng] as [number, number])
+    }
+
     const fetchRoutes = async () => {
       const entries = await Promise.all(
         requests.map(async ({ incidentId, unit }) => {
@@ -413,31 +435,26 @@ function CompanyPortal({ user }: CompanyPortalProps) {
           const lat1 = stationLocation.lat
           const lng2 = unit.location.lng
           const lat2 = unit.location.lat
-          const url =
-            `${ROUTER_BASE_URL}/route/v1/driving/` +
-            `${lng1},${lat1};${lng2},${lat2}` +
-            `?overview=full&geometries=geojson&alternatives=true`
-          try {
-            const res = await fetch(url, { signal: controller.signal })
-            if (!res.ok) throw new Error(`HTTP ${res.status}`)
-            const data = await res.json()
-            if (data.code !== 'Ok') throw new Error(`OSRM code: ${data.code}`)
-            const coords = data.routes?.[0]?.geometry?.coordinates
-            if (!coords || coords.length === 0) throw new Error('empty geometry')
-            const latlngs: [number, number][] = coords.map(
-              ([cLng, cLat]: [number, number]) => [cLat, cLng]
-            )
-            return [incidentId, latlngs] as const
-          } catch (err) {
-            console.warn(`OSRM route failed for ${incidentId}:`, err)
-            return [
-              incidentId,
-              [
-                [lat1, lng1],
-                [lat2, lng2]
-              ] as [number, number][]
-            ] as const
+          const straight: [number, number][] = [[lat1, lng1], [lat2, lng2]]
+
+          let latlngs: [number, number][] | null = null
+
+          if (ROUTER_BASE_URL.includes('localhost') || ROUTER_BASE_URL.includes('127.0.0.1')) {
+            try {
+              latlngs = await fetchOneRoute(ROUTER_BASE_URL, lng1, lat1, lng2, lat2, controller.signal)
+            } catch {}
+            if (!latlngs) {
+              try {
+                latlngs = await fetchOneRoute('https://router.project-osrm.org', lng1, lat1, lng2, lat2, controller.signal)
+              } catch {}
+            }
+          } else {
+            try {
+              latlngs = await fetchOneRoute(ROUTER_BASE_URL, lng1, lat1, lng2, lat2, controller.signal)
+            } catch {}
           }
+
+          return [incidentId, latlngs || straight] as const
         })
       )
       if (!controller.signal.aborted) {
@@ -447,6 +464,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
     fetchRoutes()
     return () => controller.abort()
   }, [stationLocation, dispatchedKey, unitById])
+
 
   const handleOptimize = async () => {
     setOptimizing(true)

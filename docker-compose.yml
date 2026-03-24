@@ -64,12 +64,10 @@ services:
     container_name: incident_frontend
     environment:
       - VITE_API_URL=http://localhost:8000
-      - VITE_ROUTER_URL=http://localhost:5000
     ports:
       - "5173:5173"
     depends_on:
       - backend
-      - osrm
 
   seed:
     build: ./backend
