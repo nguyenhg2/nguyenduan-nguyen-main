@@ -151,8 +151,8 @@ function UnitLocationPicker({
 
   const fallback =
     lat != null && lng != null
-      ? { center: [lat, lng] as [number, number], zoom: 12 }
-      : { center: [16.0, 106.0] as [number, number], zoom: 5 }
+      ? { center: [lat, lng] as [number, number], zoom: 14 }
+      : { center: [21.028, 105.854] as [number, number], zoom: 12 }
   const persisted = loadMapState(storageKey, fallback)
   const center: [number, number] = persisted.center
   const zoom = persisted.zoom
@@ -279,7 +279,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
   const stationLocation = existingStation?.location
 
   const companyUnitsMapKey = `company-units-map:${user.companyId}`
-  const companyUnitsMapInitial = loadMapState(companyUnitsMapKey, { center: [16.0, 106.0], zoom: 5 })
+  const companyUnitsMapInitial = loadMapState(companyUnitsMapKey, { center: [21.028, 105.854], zoom: 12 })
 
   const unitLocationPickerKey = `unit-location-picker:${user.companyId}:${editingUnitId ?? 'new'}`
   const stationReady = Boolean(stationLocation)
@@ -302,7 +302,6 @@ function CompanyPortal({ user }: CompanyPortalProps) {
     ).entries()
   ).map(([typeCode, name]) => ({ typeCode, name }))
 
-  // FIX: dung useMemo de on dinh tham chieu, tranh useEffect chay lap vo han
   const activeIncidents = useMemo(
     () => incidents.filter((inc) => inc.status !== 'RESOLVED'),
     [incidents]
@@ -352,7 +351,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
   const maxTypeCount = Math.max(1, ...typeData.map(([, count]) => count))
 
   const load = async () => {
-    try { // FIX: them try/catch de tranh loi load lam sap toan bo
+    try {
       const [unitsRes, incRes, techRes, toolRes, licRes, vehRes, compRes, skillsRes, typesRes, runsRes] =
         await Promise.all([
           api.get<Unit[]>(`/api/companies/${user.companyId}/units/map`),
@@ -390,8 +389,6 @@ function CompanyPortal({ user }: CompanyPortalProps) {
     return () => clearInterval(id)
   }, [])
 
-  // FIX: useEffect lay duong di — dung dispatchedIncidents thay vi onsiteDispatches,
-  // dependency la dispatchedKey (chuoi on dinh) thay vi mang tao moi moi render
   useEffect(() => {
     if (!stationLocation) {
       setRouteLines({})
@@ -412,28 +409,32 @@ function CompanyPortal({ user }: CompanyPortalProps) {
     const fetchRoutes = async () => {
       const entries = await Promise.all(
         requests.map(async ({ incidentId, unit }) => {
-          const url = `${ROUTER_BASE_URL}/route/v1/driving/${stationLocation.lng},${stationLocation.lat};${unit.location.lng},${unit.location.lat}?overview=full&geometries=geojson`
+          const lng1 = stationLocation.lng
+          const lat1 = stationLocation.lat
+          const lng2 = unit.location.lng
+          const lat2 = unit.location.lat
+          const url =
+            `${ROUTER_BASE_URL}/route/v1/driving/` +
+            `${lng1},${lat1};${lng2},${lat2}` +
+            `?overview=full&geometries=geojson&alternatives=true`
           try {
             const res = await fetch(url, { signal: controller.signal })
-            if (!res.ok) {
-              throw new Error('route fetch failed')
-            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`)
             const data = await res.json()
+            if (data.code !== 'Ok') throw new Error(`OSRM code: ${data.code}`)
             const coords = data.routes?.[0]?.geometry?.coordinates
-            if (!coords || coords.length === 0) {
-              throw new Error('no route')
-            }
-            const latlngs = coords.map(
-              ([lng, lat]: [number, number]) => [lat, lng] as [number, number]
+            if (!coords || coords.length === 0) throw new Error('empty geometry')
+            const latlngs: [number, number][] = coords.map(
+              ([cLng, cLat]: [number, number]) => [cLat, cLng]
             )
             return [incidentId, latlngs] as const
-          } catch {
-            // Fallback: duong thang
+          } catch (err) {
+            console.warn(`OSRM route failed for ${incidentId}:`, err)
             return [
               incidentId,
               [
-                [stationLocation.lat, stationLocation.lng],
-                [unit.location.lat, unit.location.lng]
+                [lat1, lng1],
+                [lat2, lng2]
               ] as [number, number][]
             ] as const
           }
@@ -1132,7 +1133,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
                               sx={{
                                 width: `${(count / maxTypeCount) * 100}%`,
                                 height: '100%',
-                                backgroundColor: '#546e7a',
+                                backgroundColor: '#5c6bc0',
                                 borderRadius: 4
                               }}
                             />
@@ -1147,1344 +1148,1054 @@ function CompanyPortal({ user }: CompanyPortalProps) {
                 </Card>
               </Stack>
             </Grid>
+
             <Grid item xs={12} md={8}>
-              <Card sx={{ height: { xs: 420, md: 'calc(100vh - 220px)' }, minHeight: 420 }}>
-                <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  <Typography variant="h6" gutterBottom>
-                    Ban do don vi
-                  </Typography>
-                  <Box className="map-shell">
-                    <MapContainer
-                      center={companyUnitsMapInitial.center}
-                      zoom={companyUnitsMapInitial.zoom}
-                      style={{ height: '100%', width: '100%' }}
-                    >
-                      <TileLayer attribution={MAP_ATTRIBUTION} url={MAP_TILE_URL} />
-                      <MapStatePersistence storageKey={companyUnitsMapKey} />
-
-                      {/* FIX: dung dispatchedIncidents thay vi onsiteDispatches,
-                          phan biet mau do (tai cho O) va xanh net dut (tu xa R) */}
-                      {stationLocation &&
-                        dispatchedIncidents.map((inc) => {
-                          const unit = unitById.get(inc.unitId)
-                          if (!unit?.location) return null
-                          const route = routeLines[inc._id] ?? [
-                            [stationLocation.lat, stationLocation.lng],
-                            [unit.location.lat, unit.location.lng]
-                          ]
-                          const isOnsite = inc.dispatch?.mode === 'O'
-                          return (
-                            <Polyline
-                              key={`route-${inc._id}`}
-                              positions={route}
-                              pathOptions={{
-                                color: isOnsite ? '#d32f2f' : '#1976d2',
-                                weight: 3,
-                                dashArray: isOnsite ? undefined : '10 6',
-                                opacity: 0.8
-                              }}
-                            >
-                              <Tooltip sticky>
-                                {isOnsite ? 'Tai cho' : 'Tu xa'}: {inc.typeCode} - {unit.name}
-                              </Tooltip>
-                            </Polyline>
-                          )
-                        })}
-
-                      {units.map((unit) => (
-                        <Fragment key={unit._id}>
-                          {unit.activeIncidents && unit.activeIncidents > 0 && (
-                            <Marker
-                              position={[unit.location.lat, unit.location.lng]}
-                              icon={pulseIcon}
-                              interactive={false}
-                            />
-                          )}
+              <Card sx={{ height: '100%', minHeight: 480 }}>
+                <CardContent sx={{ height: '100%', p: '0 !important' }}>
+                  <MapContainer
+                    center={companyUnitsMapInitial.center}
+                    zoom={companyUnitsMapInitial.zoom}
+                    style={{ height: '100%', width: '100%', minHeight: 480 }}
+                  >
+                    <TileLayer attribution={MAP_ATTRIBUTION} url={MAP_TILE_URL} />
+                    <MapStatePersistence storageKey={companyUnitsMapKey} />
+                    {units.map((unit) => (
+                      <Marker
+                        key={unit._id}
+                        position={[unit.location.lat, unit.location.lng]}
+                        icon={unit.isSupportStation ? supportStationIcon : DefaultIcon}
+                        eventHandlers={{ click: () => handleUnitMarkerClick(unit) }}
+                      >
+                        <Tooltip direction="top" offset={[0, -20]} permanent={false}>
+                          {unit.name}
+                          {unit.isSupportStation ? ' (Tram ung cuu)' : ''}
+                        </Tooltip>
+                      </Marker>
+                    ))}
+                    {activeIncidents
+                      .filter((inc) => {
+                        const unit = unitById.get(inc.unitId)
+                        return unit?.location
+                      })
+                      .map((inc) => {
+                        const unit = unitById.get(inc.unitId)!
+                        return (
                           <Marker
+                            key={`pulse-${inc._id}`}
                             position={[unit.location.lat, unit.location.lng]}
-                            icon={unit.isSupportStation ? supportStationIcon : DefaultIcon}
-                            eventHandlers={{ click: () => handleUnitMarkerClick(unit) }}
+                            icon={pulseIcon}
                           >
-                            <Tooltip direction="top" offset={[0, -18]} permanent className="unit-label-tooltip">
-                              {unit.name}
-                            </Tooltip>
                             <Popup>
-                              <Typography variant="subtitle2">{unit.name}</Typography>
-                              <Typography variant="caption" display="block">
-                                {unit.isSupportStation
-                                  ? 'Tram ung cuu'
-                                  : `Su co dang hoat dong: ${unit.activeIncidents ?? 0}`}
-                              </Typography>
-                              {!unit.isSupportStation && (
-                                <Box mt={1}>
-                                  <Button
-                                    size="small"
-                                    variant="contained"
-                                    color="info"
-                                    fullWidth
-                                    onClick={() => handleUnitMarkerClick(unit)}
-                                  >
-                                    Truy cap don vi
-                                  </Button>
-                                </Box>
-                              )}
+                              <strong>{inc.typeCode}</strong>
+                              <br />
+                              {unitNameById.get(inc.unitId)} - {statusLabel(inc.status)}
                             </Popup>
                           </Marker>
-                        </Fragment>
-                      ))}
-                    </MapContainer>
-                  </Box>
+                        )
+                      })}
+                    {dispatchedIncidents.map((inc) => {
+                      const unit = unitById.get(inc.unitId)
+                      if (!unit?.location || !stationLocation) return null
+                      const isOnsite = inc.dispatch?.mode === 'O'
+                      const lineColor = isOnsite ? '#d32f2f' : '#1976d2'
+                      const dashArray = isOnsite ? undefined : '10 6'
+                      const points = routeLines[inc._id] || [
+                        [stationLocation.lat, stationLocation.lng],
+                        [unit.location.lat, unit.location.lng]
+                      ]
+                      const techName = inc.dispatch?.assignedTechId
+                        ? techNameById.get(inc.dispatch.assignedTechId) || inc.dispatch.assignedTechId
+                        : ''
+                      return (
+                        <Polyline
+                          key={`route-${inc._id}`}
+                          positions={points}
+                          pathOptions={{ color: lineColor, weight: 4, dashArray }}
+                        >
+                          <Tooltip sticky>
+                            {inc.typeCode} - {unitNameById.get(inc.unitId)}
+                            {techName ? ` | KTV: ${techName}` : ''}
+                            {` | ${isOnsite ? 'Toi cho' : 'Tu xa'}`}
+                          </Tooltip>
+                        </Polyline>
+                      )
+                    })}
+                  </MapContainer>
                 </CardContent>
               </Card>
             </Grid>
           </Grid>
 
-          <Card>
-            <CardContent>
-              <Typography variant="h6" gutterBottom>
-                Lich su dieu phoi
-              </Typography>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell />
-                    <TableCell>Thoi diem chay</TableCell>
-                    <TableCell>Phan cong</TableCell>
-                    <TableCell>Muc tieu</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {dispatchRuns.map((run) => (
-                    <Fragment key={run._id}>
+          {result && (
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Ket qua toi uu
+                </Typography>
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  Z1 (Tong uu tien): {result.objectives.Z1} | Z2 (Thoi gian phuc hoi): {result.objectives.Z2} | Z3 (Chi phi di chuyen): {result.objectives.Z3}
+                </Alert>
+                {result.assignments.length > 0 && (
+                  <Table size="small">
+                    <TableHead>
                       <TableRow>
-                        <TableCell>
-                          <IconButton size="small" onClick={() => toggleRunExpand(run._id)}>
-                            {expandedRuns[run._id] ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
-                          </IconButton>
-                        </TableCell>
-                        <TableCell>{new Date(run.createdAt).toLocaleString()}</TableCell>
-                        <TableCell>{run.result.assignments.length}</TableCell>
-                        <TableCell>
-                          Z1={run.result.objectives.Z1} | Z2={run.result.objectives.Z2} | Z3={run.result.objectives.Z3}
-                        </TableCell>
+                        <TableCell>Su co</TableCell>
+                        <TableCell>Ky thuat vien</TableCell>
+                        <TableCell>Che do</TableCell>
+                        <TableCell>Cong cu</TableCell>
+                        <TableCell>License</TableCell>
+                        <TableCell>Xe</TableCell>
+                        <TableCell>TG phuc hoi (gio)</TableCell>
                       </TableRow>
-                      <TableRow>
-                        <TableCell colSpan={4} sx={{ py: 0 }}>
-                          <Collapse in={expandedRuns[run._id]} timeout="auto" unmountOnExit>
-                            <Box sx={{ p: 2, backgroundColor: '#fafafa', borderRadius: 1 }}>
-                              <Typography variant="subtitle2" gutterBottom>
-                                Nguon luc da dieu phoi
-                              </Typography>
-                              <Table size="small">
-                                <TableHead>
-                                  <TableRow>
-                                    <TableCell>Su co</TableCell>
-                                    <TableCell>Don vi</TableCell>
-                                    <TableCell>Ky thuat vien</TableCell>
-                                    <TableCell>Che do</TableCell>
-                                    <TableCell>Cong cu</TableCell>
-                                    <TableCell>Cong cu phan mem</TableCell>
-                                    <TableCell>Phuong tien</TableCell>
-                                    <TableCell>Thoi gian den du kien (gio)</TableCell>
-                                  </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                  {run.result.assignments.map((assignment) => {
-                                    const incident = incidentById.get(assignment.incidentId)
-                                    const unit = incident ? unitNameById.get(incident.unitId) : undefined
-                                    return (
-                                      <TableRow key={`${run._id}-${assignment.incidentId}-${assignment.technicianId}`}>
-                                        <TableCell>{incident?.typeCode || assignment.incidentId}</TableCell>
-                                        <TableCell>{unit || incident?.unitId || '-'}</TableCell>
-                                        <TableCell>
-                                          {techNameById.get(assignment.technicianId) || assignment.technicianId}
-                                        </TableCell>
-                                        <TableCell>{assignment.mode}</TableCell>
-                                        <TableCell>{assignment.allocatedTools.join(', ') || 'Khong co'}</TableCell>
-                                        <TableCell>{assignment.allocatedLicenses.join(', ') || 'Khong co'}</TableCell>
-                                        <TableCell>{assignment.vehicleAllocated ? 'Co' : 'Khong'}</TableCell>
-                                        <TableCell>{assignment.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
-                                      </TableRow>
-                                    )
-                                  })}
-                                </TableBody>
-                              </Table>
-                            </Box>
-                          </Collapse>
-                        </TableCell>
-                      </TableRow>
-                    </Fragment>
-                  ))}
-                </TableBody>
-              </Table>
-            </CardContent>
-          </Card>
+                    </TableHead>
+                    <TableBody>
+                      {result.assignments.map((a, idx) => {
+                        const inc = incidentById.get(a.incidentId)
+                        return (
+                          <TableRow key={idx}>
+                            <TableCell>{inc?.typeCode ?? a.incidentId}</TableCell>
+                            <TableCell>{techNameById.get(a.technicianId) || a.technicianId}</TableCell>
+                            <TableCell>{a.mode}</TableCell>
+                            <TableCell>{a.allocatedTools.join(', ') || '-'}</TableCell>
+                            <TableCell>{a.allocatedLicenses.join(', ') || '-'}</TableCell>
+                            <TableCell>{a.vehicleAllocated ? 'Co' : 'Khong'}</TableCell>
+                            <TableCell>{a.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+                {result.unassigned.length > 0 && (
+                  <Box sx={{ mt: 2 }}>
+                    <Typography variant="subtitle2" color="error">
+                      Khong the dieu phoi:
+                    </Typography>
+                    {result.unassigned.map((u, idx) => (
+                      <Typography key={idx} variant="caption" display="block">
+                        {u.typeCode} (uu tien {u.priority}): {u.reasons.join('; ')}
+                      </Typography>
+                    ))}
+                  </Box>
+                )}
+              </CardContent>
+            </Card>
+          )}
+
+          {dispatchRuns.length > 0 && (
+            <Card>
+              <CardContent>
+                <Typography variant="h6" gutterBottom>
+                  Lich su dieu phoi
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell />
+                      <TableCell>Thoi gian</TableCell>
+                      <TableCell>So su co</TableCell>
+                      <TableCell>Z1</TableCell>
+                      <TableCell>Z2</TableCell>
+                      <TableCell>Z3</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {dispatchRuns.map((run) => (
+                      <Fragment key={run._id}>
+                        <TableRow>
+                          <TableCell>
+                            <IconButton size="small" onClick={() => toggleRunExpand(run._id)}>
+                              {expandedRuns[run._id] ? <KeyboardArrowUp /> : <KeyboardArrowDown />}
+                            </IconButton>
+                          </TableCell>
+                          <TableCell>{new Date(run.createdAt).toLocaleString()}</TableCell>
+                          <TableCell>{run.incidentIds.length}</TableCell>
+                          <TableCell>{run.result.objectives.Z1}</TableCell>
+                          <TableCell>{run.result.objectives.Z2}</TableCell>
+                          <TableCell>{run.result.objectives.Z3}</TableCell>
+                        </TableRow>
+                        <TableRow>
+                          <TableCell colSpan={6} sx={{ py: 0 }}>
+                            <Collapse in={expandedRuns[run._id]} timeout="auto" unmountOnExit>
+                              <Box sx={{ p: 2 }}>
+                                <Table size="small">
+                                  <TableHead>
+                                    <TableRow>
+                                      <TableCell>Su co</TableCell>
+                                      <TableCell>KTV</TableCell>
+                                      <TableCell>Che do</TableCell>
+                                      <TableCell>TG (gio)</TableCell>
+                                    </TableRow>
+                                  </TableHead>
+                                  <TableBody>
+                                    {run.result.assignments.map((a, idx) => {
+                                      const inc = incidentById.get(a.incidentId)
+                                      return (
+                                        <TableRow key={idx}>
+                                          <TableCell>{inc?.typeCode ?? a.incidentId}</TableCell>
+                                          <TableCell>{techNameById.get(a.technicianId) || a.technicianId}</TableCell>
+                                          <TableCell>{a.mode}</TableCell>
+                                          <TableCell>{a.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
+                                        </TableRow>
+                                      )
+                                    })}
+                                  </TableBody>
+                                </Table>
+                              </Box>
+                            </Collapse>
+                          </TableCell>
+                        </TableRow>
+                      </Fragment>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
         </Stack>
       )}
 
       {mainTab === 1 && (
-        <Card>
-          <CardContent>
-            <Typography variant="h6" gutterBottom>
-              Quan tri
-            </Typography>
-            <Tabs value={manageTab} onChange={(_, value) => setManageTab(value)} sx={{ mb: 2 }}>
-              <Tab label="Don vi" />
-              <Tab label="Ky thuat vien" />
-              <Tab label="Nguon luc" />
-              <Tab label="Ky nang" />
-              <Tab label="Loai su co" />
-            </Tabs>
+        <Stack spacing={3}>
+          <Tabs value={manageTab} onChange={(_, v) => setManageTab(v)}>
+            <Tab label="Don vi" />
+            <Tab label="Ky thuat vien" />
+            <Tab label="Cong cu" />
+            <Tab label="License" />
+            <Tab label="Phuong tien" />
+            <Tab label="Ky nang" />
+            <Tab label="Loai su co" />
+          </Tabs>
 
-            {manageTab === 0 && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Don vi</Typography>
-                    <Button variant="contained" size="small" onClick={openAddUnit}>
-                      Them don vi
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Loai</TableCell>
-                        <TableCell>Dia chi</TableCell>
-                        <TableCell>Vi do</TableCell>
-                        <TableCell>Kinh do</TableCell>
-                        <TableCell>Truy cap tu xa</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 0 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Don vi</Typography>
+                  <Button variant="contained" size="small" onClick={openAddUnit}>Them don vi</Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Dia chi</TableCell>
+                      <TableCell>Lat</TableCell>
+                      <TableCell>Lng</TableCell>
+                      <TableCell>Remote</TableCell>
+                      <TableCell>Tram ung cuu</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {units.map((unit) => (
+                      <TableRow key={unit._id}>
+                        <TableCell>{unit.name}</TableCell>
+                        <TableCell>{unit.location?.address}</TableCell>
+                        <TableCell>{unit.location?.lat}</TableCell>
+                        <TableCell>{unit.location?.lng}</TableCell>
+                        <TableCell>{unit.remoteAccessReady ? 'Co' : 'Khong'}</TableCell>
+                        <TableCell>{unit.isSupportStation ? 'Co' : 'Khong'}</TableCell>
+                        <TableCell>
+                          <Button size="small" onClick={() => openEditUnit(unit)}>Sua</Button>
+                          <Button size="small" color="error" onClick={() => openDeleteUnitDialog(unit)}>Xoa</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {units.map((unit) => (
-                        <TableRow key={unit._id}>
-                          <TableCell>{unit.name}</TableCell>
-                          <TableCell>{unit.isSupportStation ? 'Tram ho tro' : 'Don vi'}</TableCell>
-                          <TableCell>{unit.location?.address || '-'}</TableCell>
-                          <TableCell>{unit.location?.lat}</TableCell>
-                          <TableCell>{unit.location?.lng}</TableCell>
-                          <TableCell>{unit.remoteAccessReady ? 'Co' : 'Khong'}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button size="small" onClick={() => openEditUnit(unit)}>
-                                Chinh sua
-                              </Button>
-                              <Button size="small" color="error" onClick={() => openDeleteUnitDialog(unit)}>
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-            {manageTab === 1 && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Ky thuat vien</Typography>
-                    <Button variant="contained" size="small" onClick={openAddTech} disabled={!stationReady}>
-                      Them ky thuat vien
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Ky nang</TableCell>
-                        <TableCell>San sang</TableCell>
-                        <TableCell>Vi do cu tru</TableCell>
-                        <TableCell>Kinh do cu tru</TableCell>
-                        <TableCell>dMatrix</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 1 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Ky thuat vien</Typography>
+                  <Button variant="contained" size="small" onClick={openAddTech} disabled={!stationReady}>
+                    Them KTV
+                  </Button>
+                </Stack>
+                {!stationReady && (
+                  <Alert severity="warning" sx={{ mb: 2 }}>
+                    Can tao tram ung cuu truoc khi them ky thuat vien.
+                  </Alert>
+                )}
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Ky nang</TableCell>
+                      <TableCell>San sang</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {technicians.map((tech) => (
+                      <TableRow key={tech._id}>
+                        <TableCell>{tech.name}</TableCell>
+                        <TableCell>{tech.skills.join(', ')}</TableCell>
+                        <TableCell>{tech.availableNow ? 'Co' : 'Khong'}</TableCell>
+                        <TableCell>
+                          <Button size="small" onClick={() => openEditTech(tech)}>Sua</Button>
+                          <Button size="small" color="error" onClick={() => handleDeleteTech(tech._id)}>Xoa</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {technicians.map((tech) => (
-                        <TableRow key={tech._id}>
-                          <TableCell>{tech.name}</TableCell>
-                          <TableCell>{tech.skills.join(', ') || '-'}</TableCell>
-                          <TableCell>{tech.availableNow ? 'Co' : 'Khong'}</TableCell>
-                          <TableCell>{stationLocation?.lat ?? tech.homeLocation?.lat ?? '-'}</TableCell>
-                          <TableCell>{stationLocation?.lng ?? tech.homeLocation?.lng ?? '-'}</TableCell>
-                          <TableCell>
-                            <Typography variant="caption" sx={{ display: 'block', maxWidth: 220 }}>
-                              {tech.dMatrix ? JSON.stringify(tech.dMatrix) : '-'}
-                            </Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button size="small" onClick={() => openEditTech(tech)}>
-                                Chinh sua
-                              </Button>
-                              <Button color="error" size="small" onClick={() => handleDeleteTech(tech._id)}>
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-            {manageTab === 2 && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Cong cu</Typography>
-                    <Button variant="contained" size="small" onClick={openAddTool}>
-                      Them cong cu
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Loai</TableCell>
-                        <TableCell>So luong kha dung</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 2 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Cong cu</Typography>
+                  <Button variant="contained" size="small" onClick={openAddTool}>Them cong cu</Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Ma</TableCell>
+                      <TableCell>So luong</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {tools.map((tool) => (
+                      <TableRow key={tool._id}>
+                        <TableCell>{tool.name}</TableCell>
+                        <TableCell>{tool.typeCode}</TableCell>
+                        <TableCell>{tool.availableQty}</TableCell>
+                        <TableCell>
+                          <Button size="small" onClick={() => openEditTool(tool)}>Sua</Button>
+                          <Button size="small" color="error" onClick={() => handleDeleteTool(tool._id)}>Xoa</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {tools.map((tool) => (
-                        <TableRow key={tool._id}>
-                          <TableCell>{tool.name}</TableCell>
-                          <TableCell>{tool.typeCode}</TableCell>
-                          <TableCell>{tool.availableQty}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button size="small" onClick={() => openEditTool(tool)}>
-                                Chinh sua
-                              </Button>
-                              <Button size="small" color="error" onClick={() => handleDeleteTool(tool._id)}>
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-                  <Divider sx={{ my: 2 }} />
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Cong cu phan mem</Typography>
-                    <Button variant="contained" size="small" onClick={openAddLicense}>
-                      Them cong cu phan mem
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Loai</TableCell>
-                        <TableCell>Han muc</TableCell>
-                        <TableCell>Dang su dung</TableCell>
-                        <TableCell>Kha dung</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 3 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">License</Typography>
+                  <Button variant="contained" size="small" onClick={openAddLicense}>Them license</Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Ma</TableCell>
+                      <TableCell>Tong</TableCell>
+                      <TableCell>Dang dung</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {licenses.map((lic) => (
+                      <TableRow key={lic._id}>
+                        <TableCell>{lic.name}</TableCell>
+                        <TableCell>{lic.typeCode}</TableCell>
+                        <TableCell>{lic.capTotal}</TableCell>
+                        <TableCell>{lic.inUseNow}</TableCell>
+                        <TableCell>
+                          <Button size="small" onClick={() => openEditLicense(lic)}>Sua</Button>
+                          <Button size="small" color="error" onClick={() => handleDeleteLicense(lic._id)}>Xoa</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {licenses.map((lic) => (
-                        <TableRow key={lic._id}>
-                          <TableCell>{lic.name}</TableCell>
-                          <TableCell>{lic.typeCode}</TableCell>
-                          <TableCell>{lic.capTotal}</TableCell>
-                          <TableCell>{lic.inUseNow}</TableCell>
-                          <TableCell>{lic.capTotal - lic.inUseNow}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button size="small" onClick={() => openEditLicense(lic)}>
-                                Chinh sua
-                              </Button>
-                              <Button size="small" color="error" onClick={() => handleDeleteLicense(lic._id)}>
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-                  <Divider sx={{ my: 2 }} />
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Phuong tien</Typography>
-                    <Button variant="contained" size="small" onClick={openAddVehicle}>
-                      Them phuong tien
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Nguon</TableCell>
-                        <TableCell>So luong kha dung</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 4 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Phuong tien</Typography>
+                  <Button variant="contained" size="small" onClick={openAddVehicle}>Them xe</Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>So luong kha dung</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {vehicles.map((v) => (
+                      <TableRow key={v._id}>
+                        <TableCell>{v.availableQty}</TableCell>
+                        <TableCell>
+                          <Button size="small" onClick={() => openEditVehicle(v)}>Sua</Button>
+                          <Button size="small" color="error" onClick={() => handleDeleteVehicle(v._id)}>Xoa</Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {vehicles.map((veh) => (
-                        <TableRow key={veh._id}>
-                          <TableCell>Nguon phuong tien</TableCell>
-                          <TableCell>{veh.availableQty}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button size="small" onClick={() => openEditVehicle(veh)}>
-                                Chinh sua
-                              </Button>
-                              <Button size="small" color="error" onClick={() => handleDeleteVehicle(veh._id)}>
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-            {manageTab === 3 && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Ky nang</Typography>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => {
-                        setSkillDialogMode('add')
-                        setEditingSkillId(null)
-                        setSkillForm({ name: '' })
-                        setSkillDialogOpen(true)
-                      }}
-                    >
-                      Them ky nang
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 5 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Ky nang</Typography>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => {
+                      setSkillDialogMode('add')
+                      setEditingSkillId(null)
+                      setSkillForm({ name: '' })
+                      setSkillDialogOpen(true)
+                    }}
+                  >
+                    Them ky nang
+                  </Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {skills.map((s) => (
+                      <TableRow key={s._id}>
+                        <TableCell>{s.name}</TableCell>
+                        <TableCell>
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              setSkillDialogMode('edit')
+                              setEditingSkillId(s._id)
+                              setSkillForm({ name: s.name })
+                              setSkillDialogOpen(true)
+                            }}
+                          >
+                            Sua
+                          </Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {skills.map((skill) => (
-                        <TableRow key={skill._id}>
-                          <TableCell>{skill.name}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button
-                                size="small"
-                                onClick={() => {
-                                  setSkillDialogMode('edit')
-                                  setEditingSkillId(skill._id)
-                                  setSkillForm({ name: skill.name })
-                                  setSkillDialogOpen(true)
-                                }}
-                              >
-                                Chinh sua
-                              </Button>
-                              <Button
-                                size="small"
-                                color="error"
-                                onClick={async () => {
-                                  await api.delete(`/api/skills/${skill._id}`)
-                                  await load()
-                                }}
-                              >
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
 
-            {manageTab === 4 && (
-              <Card variant="outlined">
-                <CardContent>
-                  <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Loai su co</Typography>
-                    <Button
-                      variant="contained"
-                      size="small"
-                      onClick={() => {
-                        setIncidentTypeDialogMode('add')
-                        setEditingIncidentTypeId(null)
-                        setIncidentTypeForm({
-                          code: '',
-                          name: '',
-                          defaultPriority: 3,
-                          defaultSetupRemote: 0.5,
-                          defaultFeasRemote: true,
-                          defaultFeasOnsite: true,
-                          requiredSkills: [],
-                          toolsR: '',
-                          toolsO: '',
-                          licensesR: '',
-                          licensesO: '',
-                          requiresVehicleIfOnsite: false
-                        })
-                        setIncidentTypeDialogOpen(true)
-                      }}
-                    >
-                      Them loai
-                    </Button>
-                  </Stack>
-                  <Table size="small">
-                    <TableHead>
-                      <TableRow>
-                        <TableCell>Ma</TableCell>
-                        <TableCell>Ten</TableCell>
-                        <TableCell>Do uu tien</TableCell>
-                        <TableCell>Kha thi tu xa</TableCell>
-                        <TableCell>Kha thi tai cho</TableCell>
-                        <TableCell>Thao tac</TableCell>
+          {manageTab === 6 && (
+            <Card>
+              <CardContent>
+                <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
+                  <Typography variant="h6">Loai su co</Typography>
+                  <Button
+                    variant="contained"
+                    size="small"
+                    onClick={() => {
+                      setIncidentTypeDialogMode('add')
+                      setEditingIncidentTypeId(null)
+                      setIncidentTypeForm({
+                        code: '', name: '', defaultPriority: 3, defaultSetupRemote: 0.5,
+                        defaultFeasRemote: true, defaultFeasOnsite: true, requiredSkills: [],
+                        toolsR: '', toolsO: '', licensesR: '', licensesO: '', requiresVehicleIfOnsite: false
+                      })
+                      setIncidentTypeDialogOpen(true)
+                    }}
+                  >
+                    Them loai su co
+                  </Button>
+                </Stack>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ma</TableCell>
+                      <TableCell>Ten</TableCell>
+                      <TableCell>Uu tien</TableCell>
+                      <TableCell>TX</TableCell>
+                      <TableCell>TC</TableCell>
+                      <TableCell>Thao tac</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {incidentTypes.map((it) => (
+                      <TableRow key={it._id}>
+                        <TableCell>{it.code}</TableCell>
+                        <TableCell>{it.name}</TableCell>
+                        <TableCell>{it.defaultPriority}</TableCell>
+                        <TableCell>{it.defaultFeasRemote ? 'Co' : 'Khong'}</TableCell>
+                        <TableCell>{it.defaultFeasOnsite ? 'Co' : 'Khong'}</TableCell>
+                        <TableCell>
+                          <Button
+                            size="small"
+                            onClick={() => {
+                              setIncidentTypeDialogMode('edit')
+                              setEditingIncidentTypeId(it._id)
+                              setIncidentTypeForm({
+                                code: it.code,
+                                name: it.name,
+                                defaultPriority: it.defaultPriority,
+                                defaultSetupRemote: it.defaultSetupRemote,
+                                defaultFeasRemote: it.defaultFeasRemote,
+                                defaultFeasOnsite: it.defaultFeasOnsite,
+                                requiredSkills: it.requirements?.requiredSkills || [],
+                                toolsR: it.requirements?.requiredToolsByMode?.R?.join(', ') || '',
+                                toolsO: it.requirements?.requiredToolsByMode?.O?.join(', ') || '',
+                                licensesR: it.requirements?.requiredLicensesByMode?.R?.join(', ') || '',
+                                licensesO: it.requirements?.requiredLicensesByMode?.O?.join(', ') || '',
+                                requiresVehicleIfOnsite: it.requirements?.requiresVehicleIfOnsite || false
+                              })
+                              setIncidentTypeDialogOpen(true)
+                            }}
+                          >
+                            Sua
+                          </Button>
+                        </TableCell>
                       </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {incidentTypes.map((type) => (
-                        <TableRow key={type._id}>
-                          <TableCell>{type.code}</TableCell>
-                          <TableCell>{type.name}</TableCell>
-                          <TableCell>{type.defaultPriority}</TableCell>
-                          <TableCell>{type.defaultFeasRemote ? 'Co' : 'Khong'}</TableCell>
-                          <TableCell>{type.defaultFeasOnsite ? 'Co' : 'Khong'}</TableCell>
-                          <TableCell>
-                            <Stack direction="row" spacing={1}>
-                              <Button
-                                size="small"
-                                onClick={() => {
-                                  setIncidentTypeDialogMode('edit')
-                                  setEditingIncidentTypeId(type._id)
-                                  setIncidentTypeForm({
-                                    code: type.code,
-                                    name: type.name,
-                                    defaultPriority: type.defaultPriority,
-                                    defaultSetupRemote: type.defaultSetupRemote,
-                                    defaultFeasRemote: type.defaultFeasRemote,
-                                    defaultFeasOnsite: type.defaultFeasOnsite,
-                                    requiredSkills: type.requirements?.requiredSkills || [],
-                                    toolsR: type.requirements?.requiredToolsByMode?.R?.join(', ') || '',
-                                    toolsO: type.requirements?.requiredToolsByMode?.O?.join(', ') || '',
-                                    licensesR: type.requirements?.requiredLicensesByMode?.R?.join(', ') || '',
-                                    licensesO: type.requirements?.requiredLicensesByMode?.O?.join(', ') || '',
-                                    requiresVehicleIfOnsite: Boolean(type.requirements?.requiresVehicleIfOnsite)
-                                  })
-                                  setIncidentTypeDialogOpen(true)
-                                }}
-                              >
-                                Chinh sua
-                              </Button>
-                              <Button
-                                size="small"
-                                color="error"
-                                onClick={async () => {
-                                  await api.delete(`/api/incident-types/${type._id}`)
-                                  await load()
-                                }}
-                              >
-                                Xoa
-                              </Button>
-                            </Stack>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            )}
-          </CardContent>
-        </Card>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          )}
+        </Stack>
       )}
 
-      <Dialog open={unitDialogOpen} onClose={closeUnitDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{unitDialogMode === 'add' ? 'Them don vi' : 'Chinh sua don vi'}</DialogTitle>
+      {unitPortalUnit && (
+        <Dialog open fullWidth maxWidth="lg" onClose={() => setUnitPortalUnit(null)}>
+          <DialogTitle>{unitPortalUnit.name}</DialogTitle>
+          <DialogContent>
+            <UnitPortal unitId={unitPortalUnit._id} />
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setUnitPortalUnit(null)}>Dong</Button>
+          </DialogActions>
+        </Dialog>
+      )}
+
+      <Dialog open={Boolean(unitAccessDialogUnit)} onClose={() => setUnitAccessDialogUnit(null)}>
+        <DialogTitle>Truy cap don vi</DialogTitle>
+        <DialogContent>
+          <Typography>
+            Mo cong don vi: {unitAccessDialogUnit?.name}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setUnitAccessDialogUnit(null)}>Huy</Button>
+          <Button variant="contained" onClick={() => handleConfirmUnitAccess('unit')}>Mo cong don vi</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={unitDialogOpen} onClose={closeUnitDialog} fullWidth maxWidth="md">
+        <DialogTitle>{unitDialogMode === 'add' ? 'Them don vi' : 'Sua don vi'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Ten"
+              label="Ten don vi"
               value={unitForm.name}
-              onChange={(e) => setUnitForm((prev) => ({ ...prev, name: e.target.value }))}
-              required
+              onChange={(e) => setUnitForm((f) => ({ ...f, name: e.target.value }))}
               fullWidth
             />
             <TextField
               label="Dia chi"
               value={unitForm.address}
-              onChange={(e) => setUnitForm((prev) => ({ ...prev, address: e.target.value }))}
+              onChange={(e) => setUnitForm((f) => ({ ...f, address: e.target.value }))}
               fullWidth
             />
-            <Stack direction="row" spacing={1}>
+            <Stack direction="row" spacing={2}>
               <TextField
-                label="Vi do"
+                label="Latitude"
                 value={unitForm.lat}
-                onChange={(e) => setUnitForm((prev) => ({ ...prev, lat: e.target.value }))}
+                onChange={(e) => setUnitForm((f) => ({ ...f, lat: e.target.value }))}
                 fullWidth
               />
               <TextField
-                label="Kinh do"
+                label="Longitude"
                 value={unitForm.lng}
-                onChange={(e) => setUnitForm((prev) => ({ ...prev, lng: e.target.value }))}
+                onChange={(e) => setUnitForm((f) => ({ ...f, lng: e.target.value }))}
                 fullWidth
               />
             </Stack>
-            <UnitLocationPicker
-              lat={unitForm.lat === '' ? null : Number(unitForm.lat)}
-              lng={unitForm.lng === '' ? null : Number(unitForm.lng)}
-              onChange={(lat, lng) =>
-                setUnitForm((prev) => ({ ...prev, lat: lat.toFixed(6), lng: lng.toFixed(6) }))
-              }
-              storageKey={unitLocationPickerKey}
-            />
+            <Box sx={{ height: 300 }}>
+              <UnitLocationPicker
+                lat={unitForm.lat ? Number(unitForm.lat) : null}
+                lng={unitForm.lng ? Number(unitForm.lng) : null}
+                onChange={(lat, lng) => setUnitForm((f) => ({ ...f, lat: String(lat), lng: String(lng) }))}
+                storageKey={unitLocationPickerKey}
+              />
+            </Box>
             <FormControlLabel
               control={
                 <Switch
                   checked={unitForm.remoteAccessReady}
-                  onChange={(e) => setUnitForm((prev) => ({ ...prev, remoteAccessReady: e.target.checked }))}
+                  onChange={(e) => setUnitForm((f) => ({ ...f, remoteAccessReady: e.target.checked }))}
                 />
               }
-              label="San sang truy cap tu xa"
+              label="Ho tro truy cap tu xa"
             />
             <FormControlLabel
               control={
-                <Checkbox
+                <Switch
                   checked={unitForm.isSupportStation}
-                  onChange={(e) => setUnitForm((prev) => ({ ...prev, isSupportStation: e.target.checked }))}
-                  disabled={stationLocked && !unitForm.isSupportStation}
+                  onChange={(e) => setUnitForm((f) => ({ ...f, isSupportStation: e.target.checked }))}
+                  disabled={stationLocked}
                 />
               }
-              label="Tram ho tro"
+              label="Tram ung cuu"
             />
-            {stationLocked && !unitForm.isSupportStation && (
-              <Typography variant="caption" color="text.secondary">
-                Tram ho tro da duoc thiet lap la {existingStation?.name}.
-              </Typography>
-            )}
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitUnit}>
-                Luu
-              </Button>
-              <Button onClick={closeUnitDialog}>Huy</Button>
-            </Stack>
-          </Stack>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={deleteUnitDialogOpen} onClose={closeDeleteUnitDialog} fullWidth maxWidth="xs">
-        <DialogTitle>Xac nhan xoa don vi</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1} sx={{ mt: 1 }}>
-            <Typography>
-              Ban co chac chan muon xoa don vi <strong>{deleteUnitTarget?.name}</strong>?
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              Hanh dong nay khong the hoan tac.
-            </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>
+          <Button onClick={closeUnitDialog}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitUnit}>Luu</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={deleteUnitDialogOpen} onClose={closeDeleteUnitDialog}>
+        <DialogTitle>Xoa don vi</DialogTitle>
+        <DialogContent>
+          <Typography>Ban co chac chan muon xoa don vi "{deleteUnitTarget?.name}"?</Typography>
+        </DialogContent>
+        <DialogActions>
           <Button onClick={closeDeleteUnitDialog}>Huy</Button>
-          <Button color="error" variant="contained" onClick={handleConfirmDeleteUnit}>
-            Xoa
-          </Button>
+          <Button variant="contained" color="error" onClick={handleConfirmDeleteUnit}>Xoa</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={techDialogOpen} onClose={closeTechDialog} fullWidth maxWidth="md">
-        <DialogTitle>{techDialogMode === 'add' ? 'Them ky thuat vien' : 'Chinh sua ky thuat vien'}</DialogTitle>
+        <DialogTitle>{techDialogMode === 'add' ? 'Them ky thuat vien' : 'Sua ky thuat vien'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Ten"
               value={techForm.name}
-              onChange={(e) => setTechForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => setTechForm((f) => ({ ...f, name: e.target.value }))}
               fullWidth
-              required
-            />
-            <Stack direction="row" spacing={1}>
-              <TextField label="Vi do tram ho tro" value={stationLocation?.lat ?? ''} fullWidth disabled />
-              <TextField label="Kinh do tram ho tro" value={stationLocation?.lng ?? ''} fullWidth disabled />
-            </Stack>
-            <TextField label="Dia chi tram ho tro" value={stationLocation?.address ?? ''} fullWidth disabled />
-            {!stationReady && (
-              <Typography variant="caption" color="error">
-                Vui long thiet lap don vi tram ho tro truoc khi them ky thuat vien.
-              </Typography>
-            )}
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={techForm.availableNow}
-                  onChange={(e) => setTechForm((prev) => ({ ...prev, availableNow: e.target.checked }))}
-                />
-              }
-              label="San sang hien tai"
             />
             <FormControl fullWidth>
-              <InputLabel id="tech-skills-label">Ky nang</InputLabel>
+              <InputLabel>Ky nang</InputLabel>
               <Select
-                labelId="tech-skills-label"
                 multiple
                 value={techForm.skills}
-                label="Ky nang"
-                renderValue={(selected) => (selected as string[]).join(', ')}
-                onChange={(event) =>
-                  setTechForm((prev) => ({ ...prev, skills: event.target.value as string[] }))
-                }
+                onChange={(e) => setTechForm((f) => ({ ...f, skills: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
               >
-                {skills.map((skill) => (
-                  <MenuItem key={skill._id} value={skill.name}>
-                    <Checkbox checked={techForm.skills.includes(skill.name)} />
-                    <ListItemText primary={skill.name} />
+                {skills.map((s) => (
+                  <MenuItem key={s._id} value={s.name}>
+                    <Checkbox checked={techForm.skills.includes(s.name)} />
+                    <ListItemText primary={s.name} />
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
-            <Typography variant="subtitle2">dMatrix (theo loai su co)</Typography>
-            <Stack spacing={1}>
-              {techForm.dMatrixRows.map((row, idx) => (
-                <Stack direction="row" spacing={1} key={`${row.typeCode}-${idx}`}>
-                  <TextField
-                    select
-                    label="Loai su co"
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={techForm.availableNow}
+                  onChange={(e) => setTechForm((f) => ({ ...f, availableNow: e.target.checked }))}
+                />
+              }
+              label="San sang"
+            />
+            <Typography variant="subtitle2">Ma tran thoi gian xu ly</Typography>
+            {techForm.dMatrixRows.map((row, idx) => (
+              <Stack key={idx} direction="row" spacing={1} alignItems="center">
+                <FormControl sx={{ minWidth: 160 }}>
+                  <InputLabel>Loai su co</InputLabel>
+                  <Select
                     value={row.typeCode}
-                    onChange={(e) =>
-                      setTechForm((prev) => ({
-                        ...prev,
-                        dMatrixRows: prev.dMatrixRows.map((r, rIdx) =>
-                          rIdx === idx ? { ...r, typeCode: e.target.value } : r
-                        )
-                      }))
-                    }
-                    fullWidth
+                    onChange={(e) => {
+                      const rows = [...techForm.dMatrixRows]
+                      rows[idx] = { ...rows[idx], typeCode: e.target.value as string }
+                      setTechForm((f) => ({ ...f, dMatrixRows: rows }))
+                    }}
                   >
-                    {incidentTypes.map((type) => (
-                      <MenuItem key={type._id} value={type.code}>
-                        {type.name}
-                      </MenuItem>
+                    {incidentTypes.map((it) => (
+                      <MenuItem key={it.code} value={it.code}>{it.code}</MenuItem>
                     ))}
-                  </TextField>
-                  <TextField
-                    select
-                    label="Che do"
+                  </Select>
+                </FormControl>
+                <FormControl sx={{ minWidth: 80 }}>
+                  <InputLabel>Che do</InputLabel>
+                  <Select
                     value={row.mode}
-                    onChange={(e) =>
-                      setTechForm((prev) => ({
-                        ...prev,
-                        dMatrixRows: prev.dMatrixRows.map((r, rIdx) =>
-                          rIdx === idx ? { ...r, mode: e.target.value as 'R' | 'O' } : r
-                        )
-                      }))
-                    }
-                    sx={{ width: 120 }}
+                    onChange={(e) => {
+                      const rows = [...techForm.dMatrixRows]
+                      rows[idx] = { ...rows[idx], mode: e.target.value as 'R' | 'O' }
+                      setTechForm((f) => ({ ...f, dMatrixRows: rows }))
+                    }}
                   >
-                    <MenuItem value="R">Tu xa</MenuItem>
-                    <MenuItem value="O">Tai cho</MenuItem>
-                  </TextField>
-                  <TextField
-                    label="Thoi luong (gio)"
-                    type="number"
-                    value={row.durationHours}
-                    onChange={(e) =>
-                      setTechForm((prev) => ({
-                        ...prev,
-                        dMatrixRows: prev.dMatrixRows.map((r, rIdx) =>
-                          rIdx === idx ? { ...r, durationHours: e.target.value } : r
-                        )
-                      }))
-                    }
-                    sx={{ width: 150 }}
-                  />
-                  <Button
-                    size="small"
-                    color="error"
-                    onClick={() =>
-                      setTechForm((prev) => ({
-                        ...prev,
-                        dMatrixRows: prev.dMatrixRows.filter((_, rIdx) => rIdx !== idx)
-                      }))
-                    }
-                  >
-                    Loai bo
-                  </Button>
-                </Stack>
-              ))}
-              <Button
-                size="small"
-                onClick={() =>
-                  setTechForm((prev) => ({
-                    ...prev,
-                    dMatrixRows: [...prev.dMatrixRows, { typeCode: '', mode: 'R', durationHours: '' }]
-                  }))
-                }
-              >
-                Them dong dMatrix
-              </Button>
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitTech} disabled={!stationReady}>
-                Luu
-              </Button>
-              <Button onClick={closeTechDialog}>Huy</Button>
-            </Stack>
+                    <MenuItem value="R">R</MenuItem>
+                    <MenuItem value="O">O</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField
+                  label="Gio"
+                  type="number"
+                  value={row.durationHours}
+                  onChange={(e) => {
+                    const rows = [...techForm.dMatrixRows]
+                    rows[idx] = { ...rows[idx], durationHours: e.target.value }
+                    setTechForm((f) => ({ ...f, dMatrixRows: rows }))
+                  }}
+                  sx={{ width: 100 }}
+                />
+                <Button
+                  size="small"
+                  color="error"
+                  onClick={() => {
+                    const rows = techForm.dMatrixRows.filter((_, i) => i !== idx)
+                    setTechForm((f) => ({ ...f, dMatrixRows: rows }))
+                  }}
+                >
+                  Xoa
+                </Button>
+              </Stack>
+            ))}
+            <Button
+              size="small"
+              onClick={() =>
+                setTechForm((f) => ({
+                  ...f,
+                  dMatrixRows: [...f.dMatrixRows, { typeCode: '', mode: 'R', durationHours: '' }]
+                }))
+              }
+            >
+              Them dong
+            </Button>
           </Stack>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={closeTechDialog}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitTech}>Luu</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={toolDialogOpen} onClose={closeToolDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{toolDialogMode === 'add' ? 'Them cong cu' : 'Chinh sua cong cu'}</DialogTitle>
+        <DialogTitle>{toolDialogMode === 'add' ? 'Them cong cu' : 'Sua cong cu'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Ten"
               value={toolForm.name}
-              onChange={(e) => setToolForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => setToolForm((f) => ({ ...f, name: e.target.value }))}
               fullWidth
             />
             <TextField
               label="Ma loai"
               value={toolForm.typeCode}
-              onChange={(e) => setToolForm((prev) => ({ ...prev, typeCode: e.target.value }))}
+              onChange={(e) => setToolForm((f) => ({ ...f, typeCode: e.target.value }))}
               fullWidth
             />
             <TextField
-              label="So luong kha dung"
+              label="So luong"
               type="number"
               value={toolForm.availableQty}
-              onChange={(e) => setToolForm((prev) => ({ ...prev, availableQty: Number(e.target.value) }))}
+              onChange={(e) => setToolForm((f) => ({ ...f, availableQty: Number(e.target.value) }))}
               fullWidth
             />
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitTool}>
-                Luu
-              </Button>
-              <Button onClick={closeToolDialog}>Huy</Button>
-            </Stack>
           </Stack>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={closeToolDialog}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitTool}>Luu</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={licenseDialogOpen} onClose={closeLicenseDialog} fullWidth maxWidth="sm">
-        <DialogTitle>
-          {licenseDialogMode === 'add' ? 'Them cong cu phan mem' : 'Chinh sua cong cu phan mem'}
-        </DialogTitle>
+        <DialogTitle>{licenseDialogMode === 'add' ? 'Them license' : 'Sua license'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Ten"
               value={licenseForm.name}
-              onChange={(e) => setLicenseForm((prev) => ({ ...prev, name: e.target.value }))}
+              onChange={(e) => setLicenseForm((f) => ({ ...f, name: e.target.value }))}
               fullWidth
             />
             <TextField
               label="Ma loai"
               value={licenseForm.typeCode}
-              onChange={(e) => setLicenseForm((prev) => ({ ...prev, typeCode: e.target.value }))}
+              onChange={(e) => setLicenseForm((f) => ({ ...f, typeCode: e.target.value }))}
               fullWidth
             />
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Tong han muc"
-                type="number"
-                value={licenseForm.capTotal}
-                onChange={(e) => setLicenseForm((prev) => ({ ...prev, capTotal: Number(e.target.value) }))}
-                fullWidth
-              />
-              <TextField
-                label="Dang su dung"
-                type="number"
-                value={licenseForm.inUseNow}
-                onChange={(e) => setLicenseForm((prev) => ({ ...prev, inUseNow: Number(e.target.value) }))}
-                fullWidth
-              />
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitLicense}>
-                Luu
-              </Button>
-              <Button onClick={closeLicenseDialog}>Huy</Button>
-            </Stack>
+            <TextField
+              label="Tong cap"
+              type="number"
+              value={licenseForm.capTotal}
+              onChange={(e) => setLicenseForm((f) => ({ ...f, capTotal: Number(e.target.value) }))}
+              fullWidth
+            />
+            <TextField
+              label="Dang dung"
+              type="number"
+              value={licenseForm.inUseNow}
+              onChange={(e) => setLicenseForm((f) => ({ ...f, inUseNow: Number(e.target.value) }))}
+              fullWidth
+            />
           </Stack>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={closeLicenseDialog}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitLicense}>Luu</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={vehicleDialogOpen} onClose={closeVehicleDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{vehicleDialogMode === 'add' ? 'Them phuong tien' : 'Chinh sua phuong tien'}</DialogTitle>
+        <DialogTitle>{vehicleDialogMode === 'add' ? 'Them phuong tien' : 'Sua phuong tien'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="So luong kha dung"
+              label="So luong"
               type="number"
               value={vehicleForm.availableQty}
-              onChange={(e) => setVehicleForm({ availableQty: Number(e.target.value) })}
+              onChange={(e) => setVehicleForm((f) => ({ ...f, availableQty: Number(e.target.value) }))}
               fullWidth
             />
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitVehicle}>
-                Luu
-              </Button>
-              <Button onClick={closeVehicleDialog}>Huy</Button>
-            </Stack>
           </Stack>
         </DialogContent>
+        <DialogActions>
+          <Button onClick={closeVehicleDialog}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitVehicle}>Luu</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={skillDialogOpen} onClose={() => setSkillDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{skillDialogMode === 'add' ? 'Them ky nang' : 'Chinh sua ky nang'}</DialogTitle>
+        <DialogTitle>{skillDialogMode === 'add' ? 'Them ky nang' : 'Sua ky nang'}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Ten ky nang"
-              value={skillForm.name}
-              onChange={(e) => setSkillForm({ name: e.target.value })}
-              fullWidth
-            />
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitSkill}>
-                Luu
-              </Button>
-              <Button onClick={() => setSkillDialogOpen(false)}>Huy</Button>
-            </Stack>
-          </Stack>
+          <TextField
+            label="Ten ky nang"
+            value={skillForm.name}
+            onChange={(e) => setSkillForm({ name: e.target.value })}
+            fullWidth
+            sx={{ mt: 1 }}
+          />
         </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={requirementsDialogOpen}
-        onClose={() => setRequirementsDialogOpen(false)}
-        fullWidth
-        maxWidth="md"
-      >
-        <DialogTitle>Yeu cau su co</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <FormControl fullWidth>
-              <InputLabel id="req-skills-label">Ky nang bat buoc</InputLabel>
-              <Select
-                labelId="req-skills-label"
-                multiple
-                value={requirementsForm.requiredSkills}
-                label="Ky nang bat buoc"
-                renderValue={(selected) => (selected as string[]).join(', ')}
-                onChange={(event) =>
-                  setRequirementsForm((prev) => ({ ...prev, requiredSkills: event.target.value as string[] }))
-                }
-              >
-                {skills.map((skill) => (
-                  <MenuItem key={skill._id} value={skill.name}>
-                    <Checkbox checked={requirementsForm.requiredSkills.includes(skill.name)} />
-                    <ListItemText primary={skill.name} />
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <Stack direction="row" spacing={1}>
-              <FormControl fullWidth>
-                <InputLabel id="req-tools-r-label">Cong cu (tu xa)</InputLabel>
-                <Select
-                  labelId="req-tools-r-label"
-                  multiple
-                  value={requirementsForm.toolsR}
-                  label="Cong cu (tu xa)"
-                  renderValue={(selected) => (selected as string[]).join(', ')}
-                  onChange={(event) =>
-                    setRequirementsForm((prev) => ({ ...prev, toolsR: event.target.value as string[] }))
-                  }
-                >
-                  {toolTypeOptions.map((tool) => (
-                    <MenuItem key={tool.typeCode} value={tool.typeCode}>
-                      <Checkbox checked={requirementsForm.toolsR.includes(tool.typeCode)} />
-                      <ListItemText primary={`${tool.name} (${tool.typeCode})`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl fullWidth>
-                <InputLabel id="req-tools-o-label">Cong cu (tai cho)</InputLabel>
-                <Select
-                  labelId="req-tools-o-label"
-                  multiple
-                  value={requirementsForm.toolsO}
-                  label="Cong cu (tai cho)"
-                  renderValue={(selected) => (selected as string[]).join(', ')}
-                  onChange={(event) =>
-                    setRequirementsForm((prev) => ({ ...prev, toolsO: event.target.value as string[] }))
-                  }
-                >
-                  {toolTypeOptions.map((tool) => (
-                    <MenuItem key={tool.typeCode} value={tool.typeCode}>
-                      <Checkbox checked={requirementsForm.toolsO.includes(tool.typeCode)} />
-                      <ListItemText primary={`${tool.name} (${tool.typeCode})`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
-
-            <Stack direction="row" spacing={1}>
-              <FormControl fullWidth>
-                <InputLabel id="req-licenses-r-label">Cong cu phan mem (tu xa)</InputLabel>
-                <Select
-                  labelId="req-licenses-r-label"
-                  multiple
-                  value={requirementsForm.licensesR}
-                  label="Cong cu phan mem (tu xa)"
-                  renderValue={(selected) => (selected as string[]).join(', ')}
-                  onChange={(event) =>
-                    setRequirementsForm((prev) => ({ ...prev, licensesR: event.target.value as string[] }))
-                  }
-                >
-                  {licenseTypeOptions.map((lic) => (
-                    <MenuItem key={lic.typeCode} value={lic.typeCode}>
-                      <Checkbox checked={requirementsForm.licensesR.includes(lic.typeCode)} />
-                      <ListItemText primary={`${lic.name} (${lic.typeCode})`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-              <FormControl fullWidth>
-                <InputLabel id="req-licenses-o-label">Cong cu phan mem (tai cho)</InputLabel>
-                <Select
-                  labelId="req-licenses-o-label"
-                  multiple
-                  value={requirementsForm.licensesO}
-                  label="Cong cu phan mem (tai cho)"
-                  renderValue={(selected) => (selected as string[]).join(', ')}
-                  onChange={(event) =>
-                    setRequirementsForm((prev) => ({ ...prev, licensesO: event.target.value as string[] }))
-                  }
-                >
-                  {licenseTypeOptions.map((lic) => (
-                    <MenuItem key={lic.typeCode} value={lic.typeCode}>
-                      <Checkbox checked={requirementsForm.licensesO.includes(lic.typeCode)} />
-                      <ListItemText primary={`${lic.name} (${lic.typeCode})`} />
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Stack>
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={requirementsForm.requiresVehicleIfOnsite}
-                  onChange={(event) =>
-                    setRequirementsForm((prev) => ({ ...prev, requiresVehicleIfOnsite: event.target.checked }))
-                  }
-                />
-              }
-              label="Yeu cau phuong tien khi tai cho"
-            />
-
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSaveRequirements}>
-                Luu
-              </Button>
-              <Button onClick={() => setRequirementsDialogOpen(false)}>Huy</Button>
-            </Stack>
-          </Stack>
-        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSkillDialogOpen(false)}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitSkill}>Luu</Button>
+        </DialogActions>
       </Dialog>
 
       <Dialog open={incidentTypeDialogOpen} onClose={() => setIncidentTypeDialogOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>
-          {incidentTypeDialogMode === 'add' ? 'Them loai su co' : 'Chinh sua loai su co'}
-        </DialogTitle>
+        <DialogTitle>{incidentTypeDialogMode === 'add' ? 'Them loai su co' : 'Sua loai su co'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Ma"
-                value={incidentTypeForm.code}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, code: e.target.value }))}
-                fullWidth
-                disabled={incidentTypeDialogMode === 'edit'}
-              />
-              <TextField
-                label="Ten"
-                value={incidentTypeForm.name}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, name: e.target.value }))}
-                fullWidth
-              />
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Do uu tien mac dinh"
-                type="number"
-                value={incidentTypeForm.defaultPriority}
-                onChange={(e) =>
-                  setIncidentTypeForm((prev) => ({ ...prev, defaultPriority: Number(e.target.value) }))
-                }
-                fullWidth
-              />
-              <TextField
-                label="Thoi gian thiet lap tu xa mac dinh (gio)"
-                type="number"
-                value={incidentTypeForm.defaultSetupRemote}
-                onChange={(e) =>
-                  setIncidentTypeForm((prev) => ({ ...prev, defaultSetupRemote: Number(e.target.value) }))
-                }
-                fullWidth
-              />
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={incidentTypeForm.defaultFeasRemote}
-                    onChange={(e) =>
-                      setIncidentTypeForm((prev) => ({ ...prev, defaultFeasRemote: e.target.checked }))
-                    }
-                  />
-                }
-                label="Kha thi tu xa"
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={incidentTypeForm.defaultFeasOnsite}
-                    onChange={(e) =>
-                      setIncidentTypeForm((prev) => ({ ...prev, defaultFeasOnsite: e.target.checked }))
-                    }
-                  />
-                }
-                label="Kha thi tai cho"
-              />
-            </Stack>
+            <TextField
+              label="Ma"
+              value={incidentTypeForm.code}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, code: e.target.value }))}
+              fullWidth
+              disabled={incidentTypeDialogMode === 'edit'}
+            />
+            <TextField
+              label="Ten"
+              value={incidentTypeForm.name}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, name: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Uu tien mac dinh"
+              type="number"
+              value={incidentTypeForm.defaultPriority}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, defaultPriority: Number(e.target.value) }))}
+              fullWidth
+            />
+            <TextField
+              label="Thoi gian setup tu xa (gio)"
+              type="number"
+              value={incidentTypeForm.defaultSetupRemote}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, defaultSetupRemote: Number(e.target.value) }))}
+              fullWidth
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={incidentTypeForm.defaultFeasRemote}
+                  onChange={(e) => setIncidentTypeForm((f) => ({ ...f, defaultFeasRemote: e.target.checked }))}
+                />
+              }
+              label="Kha thi tu xa"
+            />
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={incidentTypeForm.defaultFeasOnsite}
+                  onChange={(e) => setIncidentTypeForm((f) => ({ ...f, defaultFeasOnsite: e.target.checked }))}
+                />
+              }
+              label="Kha thi toi cho"
+            />
             <FormControl fullWidth>
-              <InputLabel id="incident-required-skills-label">Ky nang bat buoc</InputLabel>
+              <InputLabel>Ky nang yeu cau</InputLabel>
               <Select
-                labelId="incident-required-skills-label"
                 multiple
                 value={incidentTypeForm.requiredSkills}
-                label="Ky nang bat buoc"
-                renderValue={(selected) => (selected as string[]).join(', ')}
-                onChange={(event) =>
-                  setIncidentTypeForm((prev) => ({ ...prev, requiredSkills: event.target.value as string[] }))
-                }
+                onChange={(e) => setIncidentTypeForm((f) => ({ ...f, requiredSkills: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
               >
-                {skills.map((skill) => (
-                  <MenuItem key={skill._id} value={skill.name}>
-                    <Checkbox checked={incidentTypeForm.requiredSkills.includes(skill.name)} />
-                    <ListItemText primary={skill.name} />
+                {skills.map((s) => (
+                  <MenuItem key={s._id} value={s.name}>
+                    <Checkbox checked={incidentTypeForm.requiredSkills.includes(s.name)} />
+                    <ListItemText primary={s.name} />
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Cong cu (tu xa)"
-                value={incidentTypeForm.toolsR}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, toolsR: e.target.value }))}
-                fullWidth
-              />
-              <TextField
-                label="Cong cu (tai cho)"
-                value={incidentTypeForm.toolsO}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, toolsO: e.target.value }))}
-                fullWidth
-              />
-            </Stack>
-            <Stack direction="row" spacing={1}>
-              <TextField
-                label="Cong cu phan mem (tu xa)"
-                value={incidentTypeForm.licensesR}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, licensesR: e.target.value }))}
-                fullWidth
-              />
-              <TextField
-                label="Cong cu phan mem (tai cho)"
-                value={incidentTypeForm.licensesO}
-                onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, licensesO: e.target.value }))}
-                fullWidth
-              />
-            </Stack>
+            <TextField
+              label="Cong cu (TX) - phan cach dau phay"
+              value={incidentTypeForm.toolsR}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, toolsR: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="Cong cu (TC) - phan cach dau phay"
+              value={incidentTypeForm.toolsO}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, toolsO: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="License (TX) - phan cach dau phay"
+              value={incidentTypeForm.licensesR}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, licensesR: e.target.value }))}
+              fullWidth
+            />
+            <TextField
+              label="License (TC) - phan cach dau phay"
+              value={incidentTypeForm.licensesO}
+              onChange={(e) => setIncidentTypeForm((f) => ({ ...f, licensesO: e.target.value }))}
+              fullWidth
+            />
             <FormControlLabel
               control={
                 <Switch
                   checked={incidentTypeForm.requiresVehicleIfOnsite}
-                  onChange={(e) =>
-                    setIncidentTypeForm((prev) => ({ ...prev, requiresVehicleIfOnsite: e.target.checked }))
-                  }
+                  onChange={(e) => setIncidentTypeForm((f) => ({ ...f, requiresVehicleIfOnsite: e.target.checked }))}
                 />
               }
-              label="Yeu cau phuong tien khi tai cho"
+              label="Can phuong tien neu toi cho"
             />
-            <Stack direction="row" spacing={1}>
-              <Button variant="contained" onClick={handleSubmitIncidentType}>
-                Luu
-              </Button>
-              <Button onClick={() => setIncidentTypeDialogOpen(false)}>Huy</Button>
-            </Stack>
           </Stack>
         </DialogContent>
-      </Dialog>
-
-      <Dialog open={Boolean(result)} onClose={() => setResult(null)} fullWidth maxWidth="md">
-        <DialogTitle>Ket qua toi uu hoa</DialogTitle>
-        <DialogContent>
-          {result && (
-            <Stack spacing={2}>
-              <Typography variant="body2">
-                Muc tieu: Z1={result.objectives.Z1}, Z2={result.objectives.Z2}, Z3={result.objectives.Z3}
-              </Typography>
-              <Typography variant="subtitle2">Su co da dieu phoi</Typography>
-              <Box sx={{ overflowX: 'auto' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Su co</TableCell>
-                      <TableCell>Ky thuat vien</TableCell>
-                      <TableCell>Che do</TableCell>
-                      <TableCell>Nguon luc</TableCell>
-                      <TableCell>Thoi gian (gio)</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {result.assignments.map((a) => (
-                      <TableRow key={`${a.incidentId}-${a.technicianId}`}>
-                        <TableCell>{a.incidentId}</TableCell>
-                        <TableCell>{a.technicianId}</TableCell>
-                        <TableCell>{a.mode}</TableCell>
-                        <TableCell>
-                          Cong cu: {a.allocatedTools.join(', ') || 'Khong co'} | Cong cu phan mem:{' '}
-                          {a.allocatedLicenses.join(', ') || 'Khong co'}
-                        </TableCell>
-                        <TableCell>{a.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
-                      </TableRow>
-                    ))}
-                    {result.assignments.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={5}>
-                          <Typography variant="caption" color="text.secondary">
-                            Khong co su co nao duoc dieu phoi trong lan chay nay.
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </Box>
-
-              <Typography variant="subtitle2">Chua duoc dieu phoi</Typography>
-              <Box sx={{ overflowX: 'auto' }}>
-                <Table size="small">
-                  <TableHead>
-                    <TableRow>
-                      <TableCell>Su co</TableCell>
-                      <TableCell>Do uu tien</TableCell>
-                      <TableCell>Ly do</TableCell>
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {(result.unassigned ?? []).map((entry) => (
-                      <TableRow key={`unassigned-${entry.incidentId}`}>
-                        <TableCell>{entry.typeCode || entry.incidentId}</TableCell>
-                        <TableCell>{entry.priority}</TableCell>
-                        <TableCell>
-                          <Stack spacing={0.5}>
-                            {entry.reasons.map((reason, idx) => (
-                              <Typography key={`${entry.incidentId}-reason-${idx}`} variant="caption">
-                                {reason}
-                              </Typography>
-                            ))}
-                          </Stack>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {(result.unassigned ?? []).length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={3}>
-                          <Typography variant="caption" color="text.secondary">
-                            Tat ca cac su co ung vien deu da duoc dieu phoi.
-                          </Typography>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </Box>
-
-              <Stack direction="row" justifyContent="flex-end">
-                <Button variant="contained" onClick={() => setResult(null)}>
-                  Xac nhan
-                </Button>
-              </Stack>
-            </Stack>
-          )}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={Boolean(unitAccessDialogUnit)}
-        onClose={() => setUnitAccessDialogUnit(null)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>
-          Truy cap don vi: <b>{unitAccessDialogUnit?.name}</b>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ mt: 1 }}>
-            <Typography variant="body2" color="text.secondary">
-              Chon che do truy cap cho don vi nay:
-            </Typography>
-            {unitAccessDialogUnit?.location?.address && (
-              <Typography variant="caption" color="text.secondary">
-                Dia chi: {unitAccessDialogUnit.location.address}
-              </Typography>
-            )}
-            {(unitAccessDialogUnit?.activeIncidents ?? 0) > 0 && (
-              <Alert severity="warning" sx={{ py: 0.5 }}>
-                Dang co {unitAccessDialogUnit?.activeIncidents} su co chua giai quyet
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ flexDirection: 'column', gap: 1, px: 3, pb: 2.5 }}>
-          <Button
-            variant="contained"
-            color="info"
-            fullWidth
-            onClick={() => handleConfirmUnitAccess('unit')}
-          >
-            Vao giao dien Don vi (Dien tap)
-          </Button>
-          <Button fullWidth onClick={() => setUnitAccessDialogUnit(null)}>
-            Huy
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setIncidentTypeDialogOpen(false)}>Huy</Button>
+          <Button variant="contained" onClick={handleSubmitIncidentType}>Luu</Button>
         </DialogActions>
       </Dialog>
 
-      {unitPortalUnit && (
-        <UnitPortal
-          unit={{ ...unitPortalUnit, _id: unitPortalUnit._id ?? (unitPortalUnit as any).id ?? '' }}
-          companyId={user.companyId}
-          onClose={() => {
-            setUnitPortalUnit(null)
-            load()
-          }}
-        />
-      )}
+      <Dialog open={requirementsDialogOpen} onClose={() => setRequirementsDialogOpen(false)} fullWidth maxWidth="md">
+        <DialogTitle>Yeu cau su co</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <FormControl fullWidth>
+              <InputLabel>Ky nang yeu cau</InputLabel>
+              <Select
+                multiple
+                value={requirementsForm.requiredSkills}
+                onChange={(e) => setRequirementsForm((f) => ({ ...f, requiredSkills: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {skills.map((s) => (
+                  <MenuItem key={s._id} value={s.name}>
+                    <Checkbox checked={requirementsForm.requiredSkills.includes(s.name)} />
+                    <ListItemText primary={s.name} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Cong cu (TX)</InputLabel>
+              <Select
+                multiple
+                value={requirementsForm.toolsR}
+                onChange={(e) => setRequirementsForm((f) => ({ ...f, toolsR: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {toolTypeOptions.map((opt) => (
+                  <MenuItem key={opt.typeCode} value={opt.typeCode}>
+                    <Checkbox checked={requirementsForm.toolsR.includes(opt.typeCode)} />
+                    <ListItemText primary={opt.name} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>Cong cu (TC)</InputLabel>
+              <Select
+                multiple
+                value={requirementsForm.toolsO}
+                onChange={(e) => setRequirementsForm((f) => ({ ...f, toolsO: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {toolTypeOptions.map((opt) => (
+                  <MenuItem key={opt.typeCode} value={opt.typeCode}>
+                    <Checkbox checked={requirementsForm.toolsO.includes(opt.typeCode)} />
+                    <ListItemText primary={opt.name} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>License (TX)</InputLabel>
+              <Select
+                multiple
+                value={requirementsForm.licensesR}
+                onChange={(e) => setRequirementsForm((f) => ({ ...f, licensesR: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {licenseTypeOptions.map((opt) => (
+                  <MenuItem key={opt.typeCode} value={opt.typeCode}>
+                    <Checkbox checked={requirementsForm.licensesR.includes(opt.typeCode)} />
+                    <ListItemText primary={opt.name} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl fullWidth>
+              <InputLabel>License (TC)</InputLabel>
+              <Select
+                multiple
+                value={requirementsForm.licensesO}
+                onChange={(e) => setRequirementsForm((f) => ({ ...f, licensesO: e.target.value as string[] }))}
+                renderValue={(selected) => selected.join(', ')}
+              >
+                {licenseTypeOptions.map((opt) => (
+                  <MenuItem key={opt.typeCode} value={opt.typeCode}>
+                    <Checkbox checked={requirementsForm.licensesO.includes(opt.typeCode)} />
+                    <ListItemText primary={opt.name} />
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={requirementsForm.requiresVehicleIfOnsite}
+                  onChange={(e) => setRequirementsForm((f) => ({ ...f, requiresVehicleIfOnsite: e.target.checked }))}
+                />
+              }
+              label="Can phuong tien neu toi cho"
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRequirementsDialogOpen(false)}>Huy</Button>
+          <Button variant="contained" onClick={handleSaveRequirements}>Luu</Button>
+        </DialogActions>
+      </Dialog>
     </Stack>
   )
 }
