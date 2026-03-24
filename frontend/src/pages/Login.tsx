@@ -36,7 +36,7 @@ export default function Login({ onLogin }: LoginProps) {
       <Card sx={{ width: 400 }}>
         <CardContent>
           <Typography variant="h5" gutterBottom fontWeight="bold">
-            🚨 Hệ thống điều phối ứng cứu sự cố
+             Hệ thống điều phối ứng cứu sự cố
           </Typography>
           <Typography variant="body2" color="text.secondary" mb={2}>
             Vui lòng đăng nhập để tiếp tục

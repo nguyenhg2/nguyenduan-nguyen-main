@@ -323,7 +323,7 @@ export default function UnitPortal({ unit, companyId, onClose }: Props) {
             <Alert severity="error">Khong xac dinh duoc ID don vi. Vui long dong va mo lai.</Alert>
           ) : (
             <>
-              {/* ===== TAB 0: BAO CAO SU CO ===== */}
+              {}
               {tab === 0 && (
                 <Stack spacing={3} maxWidth={700}>
                   <Paper variant="outlined" sx={{ p: 2.5 }}>
@@ -347,7 +347,7 @@ export default function UnitPortal({ unit, companyId, onClose }: Props) {
                         </Select>
                       </FormControl>
 
-                      {/* Hien thi priority tu dong */}
+                      {}
                       {autoPriority !== null && (
                         <Stack direction="row" alignItems="center" spacing={1}>
                           <Typography variant="body2" color="text.secondary">
@@ -448,7 +448,7 @@ export default function UnitPortal({ unit, companyId, onClose }: Props) {
                 </Stack>
               )}
 
-              {/* ===== TAB 1: BIEN CHE ===== */}
+              {}
               {tab === 1 && (
                 <Stack spacing={2}>
                   <Stack direction="row" justifyContent="space-between" alignItems="center">
@@ -514,7 +514,7 @@ export default function UnitPortal({ unit, companyId, onClose }: Props) {
                 </Stack>
               )}
 
-              {/* ===== TAB 2: LICH SU ===== */}
+              {}
               {tab === 2 && (
                 <Stack spacing={1}>
                   <Typography variant="subtitle1" fontWeight="bold" gutterBottom>

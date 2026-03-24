@@ -9,6 +9,43 @@ services:
     volumes:
       - mongo_data:/data/db
 
+  osrm:
+    image: osrm/osrm-backend:latest
+    container_name: incident_osrm
+    ports:
+      - "5000:5000"
+    volumes:
+      - osrm_data:/data
+    command: >
+      osrm-routed --algorithm mld /data/vietnam-latest.osrm
+    depends_on:
+      osrm-init:
+        condition: service_completed_successfully
+
+  osrm-init:
+    image: osrm/osrm-backend:latest
+    container_name: incident_osrm_init
+    volumes:
+      - osrm_data:/data
+    entrypoint: /bin/bash
+    command: >
+      -c "
+      if [ -f /data/vietnam-latest.osrm.datasource_names ]; then
+        echo 'OSRM data already prepared, skipping...';
+        exit 0;
+      fi;
+      echo 'Downloading Vietnam OSM data...';
+      apt-get update && apt-get install -y wget;
+      wget -q -O /data/vietnam-latest.osm.pbf https://download.geofabrik.de/asia/vietnam-latest.osm.pbf;
+      echo 'Extracting...';
+      osrm-extract -p /opt/car.lua /data/vietnam-latest.osm.pbf;
+      echo 'Partitioning...';
+      osrm-partition /data/vietnam-latest.osrm;
+      echo 'Customizing...';
+      osrm-customize /data/vietnam-latest.osrm;
+      echo 'Done! OSRM Vietnam data ready.';
+      "
+
   backend:
     build: ./backend
     container_name: incident_backend
@@ -27,10 +64,12 @@ services:
     container_name: incident_frontend
     environment:
       - VITE_API_URL=http://localhost:8000
+      - VITE_ROUTER_URL=http://localhost:5000
     ports:
       - "5173:5173"
     depends_on:
       - backend
+      - osrm
 
   seed:
     build: ./backend
@@ -47,3 +86,4 @@ services:
 
 volumes:
   mongo_data:
+  osrm_data:

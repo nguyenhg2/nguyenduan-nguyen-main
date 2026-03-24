@@ -65,7 +65,6 @@ const ROUTER_BASE_URL = (
   import.meta.env.VITE_ROUTER_URL || 'https://router.project-osrm.org'
 ).replace(/\/$/, '')
 
-// Fix default marker icons in Leaflet with Vite
 const DefaultIcon = L.icon({
   iconRetinaUrl: markerIcon2x,
   iconUrl: markerIcon,
@@ -151,7 +150,9 @@ function UnitLocationPicker({
   }
 
   const fallback =
-    lat != null && lng != null ? { center: [lat, lng] as [number, number], zoom: 12 } : { center: [16.0, 106.0] as [number, number], zoom: 5 }
+    lat != null && lng != null
+      ? { center: [lat, lng] as [number, number], zoom: 12 }
+      : { center: [16.0, 106.0] as [number, number], zoom: 5 }
   const persisted = loadMapState(storageKey, fallback)
   const center: [number, number] = persisted.center
   const zoom = persisted.zoom
@@ -159,10 +160,7 @@ function UnitLocationPicker({
   return (
     <Box className="unit-map-shell">
       <MapContainer center={center} zoom={zoom} style={{ height: '100%', width: '100%' }}>
-        <TileLayer
-          attribution={MAP_ATTRIBUTION}
-          url={MAP_TILE_URL}
-        />
+        <TileLayer attribution={MAP_ATTRIBUTION} url={MAP_TILE_URL} />
         <MapStatePersistence storageKey={storageKey} />
         <ClickHandler />
         {lat != null && lng != null && <Marker position={[lat, lng]} />}
@@ -189,7 +187,7 @@ function CompanyPortal({ user }: CompanyPortalProps) {
   const [result, setResult] = useState<OptimizeResult | null>(null)
   const [optimizing, setOptimizing] = useState(false)
   const [unitAccessDialogUnit, setUnitAccessDialogUnit] = useState<Unit | null>(null)
-const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
+  const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   const [routeLines, setRouteLines] = useState<Record<string, [number, number][]>>({})
   const unitNameById = useMemo(() => new Map(units.map((u) => [u._id, u.name])), [units])
   const unitById = useMemo(() => new Map(units.map((u) => [u._id, u])), [units])
@@ -303,23 +301,36 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
       ] as Array<[string, string]>
     ).entries()
   ).map(([typeCode, name]) => ({ typeCode, name }))
-  const activeIncidents = incidents.filter((inc) => inc.status !== 'RESOLVED')
-  const onsiteDispatches = activeIncidents.filter((inc) => inc.dispatch?.mode === 'O')
+
+  // FIX: dung useMemo de on dinh tham chieu, tranh useEffect chay lap vo han
+  const activeIncidents = useMemo(
+    () => incidents.filter((inc) => inc.status !== 'RESOLVED'),
+    [incidents]
+  )
+  const dispatchedIncidents = useMemo(
+    () => activeIncidents.filter((inc) => Boolean(inc.dispatch)),
+    [activeIncidents]
+  )
+  const dispatchedKey = useMemo(
+    () => dispatchedIncidents.map((d) => `${d._id}:${d.dispatch?.mode}`).join(','),
+    [dispatchedIncidents]
+  )
+
   const incidentRowsPerPage = 5
   const pagedIncidents = activeIncidents.slice(
     incidentPage * incidentRowsPerPage,
     incidentPage * incidentRowsPerPage + incidentRowsPerPage
   )
   const statusLabel = (status: string) => {
-    if (status === 'DISPATCHED' || status === 'IN_PROGRESS' || status === 'DISPATCHING') return 'Đang điều phối'
-    if (status === 'OPEN') return 'Mở'
-    if (status === 'RESOLVED') return 'Hoàn tất'
+    if (status === 'DISPATCHED' || status === 'IN_PROGRESS' || status === 'DISPATCHING') return 'Dang dieu phoi'
+    if (status === 'OPEN') return 'Mo'
+    if (status === 'RESOLVED') return 'Hoan tat'
     return status
   }
   const statusBuckets = [
-    { key: 'OPEN', label: 'Mở', color: '#0277bd' },
-    { key: 'DISPATCHING', label: 'Đang điều phối', color: '#f9a825' },
-    { key: 'RESOLVED', label: 'Hoàn tất', color: '#2e7d32' }
+    { key: 'OPEN', label: 'Mo', color: '#0277bd' },
+    { key: 'DISPATCHING', label: 'Dang dieu phoi', color: '#f9a825' },
+    { key: 'RESOLVED', label: 'Hoan tat', color: '#2e7d32' }
   ]
   const rawStatusCounts = incidents.reduce<Record<string, number>>((acc, inc) => {
     acc[inc.status] = (acc[inc.status] ?? 0) + 1
@@ -341,32 +352,36 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   const maxTypeCount = Math.max(1, ...typeData.map(([, count]) => count))
 
   const load = async () => {
-    const [unitsRes, incRes, techRes, toolRes, licRes, vehRes, compRes, skillsRes, typesRes, runsRes] =
-      await Promise.all([
-        api.get<Unit[]>(`/api/companies/${user.companyId}/units/map`),
-        api.get<Incident[]>('/api/incidents?scope=company'),
-        api.get<Technician[]>('/api/technicians'),
-        api.get<Tool[]>('/api/tools'),
-        api.get<License[]>('/api/licenses'),
-        api.get<Vehicle[]>('/api/vehicles'),
-        api.get<Component[]>('/api/components?scope=company'),
-        api.get<Skill[]>('/api/skills'),
-        api.get<IncidentType[]>('/api/incident-types'),
-        api.get<DispatchRun[]>('/api/dispatch-runs')
-      ])
-    setUnits((unitsRes.data as Unit[]).map(u => ({ ...u, id: u._id })))
-    setIncidents(incRes.data)
-    setTechnicians(techRes.data)
-    setTools(toolRes.data)
-    setLicenses(licRes.data)
-    setVehicles(vehRes.data)
-    setComponents(compRes.data)
-    setSkills(skillsRes.data)
-    setIncidentTypes(typesRes.data)
-    setDispatchRuns(runsRes.data)
-    setIncidentPriorityEdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.priority])))
-    setIncidentModeREdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.modeFeas?.R ?? false])))
-    setIncidentModeOEdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.modeFeas?.O ?? false])))
+    try { // FIX: them try/catch de tranh loi load lam sap toan bo
+      const [unitsRes, incRes, techRes, toolRes, licRes, vehRes, compRes, skillsRes, typesRes, runsRes] =
+        await Promise.all([
+          api.get<Unit[]>(`/api/companies/${user.companyId}/units/map`),
+          api.get<Incident[]>('/api/incidents?scope=company'),
+          api.get<Technician[]>('/api/technicians'),
+          api.get<Tool[]>('/api/tools'),
+          api.get<License[]>('/api/licenses'),
+          api.get<Vehicle[]>('/api/vehicles'),
+          api.get<Component[]>('/api/components?scope=company'),
+          api.get<Skill[]>('/api/skills'),
+          api.get<IncidentType[]>('/api/incident-types'),
+          api.get<DispatchRun[]>('/api/dispatch-runs')
+        ])
+      setUnits((unitsRes.data as Unit[]).map((u) => ({ ...u, id: u._id })))
+      setIncidents(incRes.data)
+      setTechnicians(techRes.data)
+      setTools(toolRes.data)
+      setLicenses(licRes.data)
+      setVehicles(vehRes.data)
+      setComponents(compRes.data)
+      setSkills(skillsRes.data)
+      setIncidentTypes(typesRes.data)
+      setDispatchRuns(runsRes.data)
+      setIncidentPriorityEdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.priority])))
+      setIncidentModeREdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.modeFeas?.R ?? false])))
+      setIncidentModeOEdits(Object.fromEntries(incRes.data.map((i) => [i._id, i.modeFeas?.O ?? false])))
+    } catch (err) {
+      console.error('load() failed:', err)
+    }
   }
 
   useEffect(() => {
@@ -375,18 +390,20 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
     return () => clearInterval(id)
   }, [])
 
+  // FIX: useEffect lay duong di — dung dispatchedIncidents thay vi onsiteDispatches,
+  // dependency la dispatchedKey (chuoi on dinh) thay vi mang tao moi moi render
   useEffect(() => {
     if (!stationLocation) {
       setRouteLines({})
       return
     }
-    const requests = onsiteDispatches
+    const requests = dispatchedIncidents
       .map((inc) => {
         const unit = unitById.get(inc.unitId)
         if (!unit?.location) return null
-        return { incidentId: inc._id, unit }
+        return { incidentId: inc._id, unit, mode: inc.dispatch?.mode }
       })
-      .filter(Boolean) as Array<{ incidentId: string; unit: Unit }>
+      .filter(Boolean) as Array<{ incidentId: string; unit: Unit; mode?: string }>
     if (requests.length === 0) {
       setRouteLines({})
       return
@@ -411,6 +428,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             )
             return [incidentId, latlngs] as const
           } catch {
+            // Fallback: duong thang
             return [
               incidentId,
               [
@@ -427,7 +445,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
     }
     fetchRoutes()
     return () => controller.abort()
-  }, [stationLocation, onsiteDispatches, unitById])
+  }, [stationLocation, dispatchedKey, unitById])
 
   const handleOptimize = async () => {
     setOptimizing(true)
@@ -439,6 +457,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
       setOptimizing(false)
     }
   }
+
   const handleUnitMarkerClick = (unit: Unit) => {
     if (unit.isSupportStation) return
     setUnitAccessDialogUnit(unit)
@@ -498,9 +517,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   }
 
   const handleSubmitTech = async () => {
-    if (!stationLocation) {
-      return
-    }
+    if (!stationLocation) return
     const lat = Number(stationLocation.lat)
     const lng = Number(stationLocation.lng)
     const dMatrix = techForm.dMatrixRows
@@ -510,10 +527,9 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
         mode: row.mode,
         durationHours: Number(row.durationHours)
       }))
-    const skills = techForm.skills
     const payload = {
       name: techForm.name,
-      skills,
+      skills: techForm.skills,
       availableNow: techForm.availableNow,
       homeLocation: { lat, lng, address: stationLocation.address },
       dMatrix
@@ -648,7 +664,6 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
     await load()
   }
 
-
   const handleSaveIncidentConfig = async (incidentId: string) => {
     await api.patch(`/api/incidents/${incidentId}`, {
       priority: Number(incidentPriorityEdits[incidentId] ?? 1),
@@ -680,9 +695,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   }
 
   const handleSaveRequirements = async () => {
-    if (!requirementsIncidentId) {
-      return
-    }
+    if (!requirementsIncidentId) return
     await api.patch(`/api/incidents/${requirementsIncidentId}`, {
       requirements: {
         requiredSkills: requirementsForm.requiredSkills,
@@ -717,14 +730,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   const openAddUnit = () => {
     setUnitDialogMode('add')
     setEditingUnitId(null)
-    setUnitForm({
-      name: '',
-      address: '',
-      lat: '',
-      lng: '',
-      remoteAccessReady: false,
-      isSupportStation: false
-    })
+    setUnitForm({ name: '', address: '', lat: '', lng: '', remoteAccessReady: false, isSupportStation: false })
     setUnitDialogOpen(true)
   }
 
@@ -749,12 +755,8 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   const handleSubmitUnit = async () => {
     const lat = Number(unitForm.lat)
     const lng = Number(unitForm.lng)
-    if (Number.isNaN(lat) || Number.isNaN(lng)) {
-      return
-    }
-    if (unitForm.isSupportStation && existingStation && existingStation._id !== editingUnitId) {
-      return
-    }
+    if (Number.isNaN(lat) || Number.isNaN(lng)) return
+    if (unitForm.isSupportStation && existingStation && existingStation._id !== editingUnitId) return
     const payload = {
       name: unitForm.name,
       location: { lat, lng, address: unitForm.address },
@@ -788,9 +790,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   }
 
   const handleSubmitSkill = async () => {
-    if (!skillForm.name.trim()) {
-      return
-    }
+    if (!skillForm.name.trim()) return
     if (skillDialogMode === 'add') {
       await api.post('/api/skills', { name: skillForm.name.trim() })
     } else if (editingSkillId) {
@@ -801,10 +801,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
   }
 
   const parseList = (value: string) =>
-    value
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
+    value.split(',').map((s) => s.trim()).filter(Boolean)
 
   const handleSubmitIncidentType = async () => {
     const payload = {
@@ -845,10 +842,10 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
   return (
     <Stack spacing={3}>
-      <Typography variant="h5">Bảng điều khiển doanh nghiệp</Typography>
+      <Typography variant="h5">Bang dieu khien doanh nghiep</Typography>
       <Tabs value={mainTab} onChange={(_, value) => setMainTab(value)}>
-        <Tab label="Điều phối" />
-        <Tab label="Quản trị" />
+        <Tab label="Dieu phoi" />
+        <Tab label="Quan tri" />
       </Tabs>
 
       {mainTab === 0 && (
@@ -856,24 +853,24 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
           <Card>
             <CardContent>
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                <Typography variant="h6">Sự cố đang xử lý</Typography>
+                <Typography variant="h6">Su co dang xu ly</Typography>
                 <Typography variant="caption" color="text.secondary">
-                  Hiển thị {Math.min(activeIncidents.length, incidentRowsPerPage)} trên {activeIncidents.length}
+                  Hien thi {Math.min(activeIncidents.length, incidentRowsPerPage)} tren {activeIncidents.length}
                 </Typography>
               </Stack>
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell />
-                    <TableCell>Loại</TableCell>
-                    <TableCell>Thành phần</TableCell>
-                    <TableCell>Trạng thái</TableCell>
-                    <TableCell>Độ ưu tiên</TableCell>
-                    <TableCell>Đơn vị</TableCell>
-                    <TableCell>Tính khả thi (chế độ)</TableCell>
-                    <TableCell>Thời điểm báo cáo</TableCell>
-                    <TableCell>Yêu cầu</TableCell>
-                    <TableCell>Thao tác</TableCell>
+                    <TableCell>Loai</TableCell>
+                    <TableCell>Thanh phan</TableCell>
+                    <TableCell>Trang thai</TableCell>
+                    <TableCell>Do uu tien</TableCell>
+                    <TableCell>Don vi</TableCell>
+                    <TableCell>Tinh kha thi (che do)</TableCell>
+                    <TableCell>Thoi diem bao cao</TableCell>
+                    <TableCell>Yeu cau</TableCell>
+                    <TableCell>Thao tac</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -941,26 +938,26 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <TableCell>{new Date(inc.reportedAt).toLocaleString()}</TableCell>
                           <TableCell>
                             <Typography variant="caption" sx={{ display: 'block' }}>
-                              Kỹ năng: {inc.requirements?.requiredSkills?.length ?? 0} | Công cụ (TX/TC):
+                              Ky nang: {inc.requirements?.requiredSkills?.length ?? 0} | Cong cu (TX/TC):
                               {inc.requirements?.requiredToolsByMode?.R?.length ?? 0}/
-                              {inc.requirements?.requiredToolsByMode?.O?.length ?? 0} | Công cụ phần mềm (TX/TC):
+                              {inc.requirements?.requiredToolsByMode?.O?.length ?? 0} | Cong cu phan mem (TX/TC):
                               {inc.requirements?.requiredLicensesByMode?.R?.length ?? 0}/
-                              {inc.requirements?.requiredLicensesByMode?.O?.length ?? 0} | Phương tiện:
-                              {inc.requirements?.requiresVehicleIfOnsite ? 'Có' : 'Không'}
+                              {inc.requirements?.requiredLicensesByMode?.O?.length ?? 0} | Phuong tien:
+                              {inc.requirements?.requiresVehicleIfOnsite ? 'Co' : 'Khong'}
                             </Typography>
                             <Button size="small" onClick={() => openRequirementsDialog(inc)}>
-                              Chỉnh sửa
+                              Chinh sua
                             </Button>
                           </TableCell>
                           <TableCell>
                             {isEditable ? (
                               <Button size="small" onClick={() => handleSaveIncidentConfig(inc._id)}>
-                                Lưu
+                                Luu
                               </Button>
                             ) : (
                               (inc.status === 'DISPATCHED' || inc.status === 'IN_PROGRESS') && (
                                 <Button size="small" color="warning" onClick={() => handleCancelDispatch(inc._id)}>
-                                  Hủy điều phối
+                                  Huy dieu phoi
                                 </Button>
                               )
                             )}
@@ -971,18 +968,18 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                             <Collapse in={expandedIncidents[inc._id]} timeout="auto" unmountOnExit>
                               <Box sx={{ p: 2, backgroundColor: '#fafafa', borderRadius: 1 }}>
                                 <Typography variant="subtitle2" gutterBottom>
-                                  Nguồn lực đã điều phối
+                                  Nguon luc da dieu phoi
                                 </Typography>
                                 {inc.dispatch ? (
                                   <Table size="small">
                                     <TableHead>
                                       <TableRow>
-                                        <TableCell>Kỹ thuật viên</TableCell>
-                                        <TableCell>Chế độ</TableCell>
-                                        <TableCell>Công cụ</TableCell>
-                                        <TableCell>Công cụ phần mềm</TableCell>
-                                        <TableCell>Phương tiện</TableCell>
-                                        <TableCell>Thời gian đến dự kiến (giờ)</TableCell>
+                                        <TableCell>Ky thuat vien</TableCell>
+                                        <TableCell>Che do</TableCell>
+                                        <TableCell>Cong cu</TableCell>
+                                        <TableCell>Cong cu phan mem</TableCell>
+                                        <TableCell>Phuong tien</TableCell>
+                                        <TableCell>Thoi gian den du kien (gio)</TableCell>
                                       </TableRow>
                                     </TableHead>
                                     <TableBody>
@@ -991,16 +988,16 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                           {techNameById.get(inc.dispatch.assignedTechId) || inc.dispatch.assignedTechId}
                                         </TableCell>
                                         <TableCell>{inc.dispatch.mode}</TableCell>
-                                        <TableCell>{inc.dispatch.allocatedTools.join(', ') || 'Không có'}</TableCell>
-                                        <TableCell>{inc.dispatch.allocatedLicenses.join(', ') || 'Không có'}</TableCell>
-                                        <TableCell>{inc.dispatch.vehicleAllocated ? 'Có' : 'Không'}</TableCell>
+                                        <TableCell>{inc.dispatch.allocatedTools.join(', ') || 'Khong co'}</TableCell>
+                                        <TableCell>{inc.dispatch.allocatedLicenses.join(', ') || 'Khong co'}</TableCell>
+                                        <TableCell>{inc.dispatch.vehicleAllocated ? 'Co' : 'Khong'}</TableCell>
                                         <TableCell>{inc.dispatch.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
                                       </TableRow>
                                     </TableBody>
                                   </Table>
                                 ) : (
                                   <Typography variant="caption" color="text.secondary">
-                                    Chưa có điều phối nào được gán.
+                                    Chua co dieu phoi nao duoc gan.
                                   </Typography>
                                 )}
                               </Box>
@@ -1029,37 +1026,37 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Nguồn lực
+                      Nguon luc
                     </Typography>
                     <Box sx={{ overflowX: 'auto' }}>
                       <Table size="small">
                         <TableHead>
                           <TableRow>
-                            <TableCell>Danh mục</TableCell>
-                            <TableCell>Tên</TableCell>
-                            <TableCell>Mã</TableCell>
-                            <TableCell align="right">Khả dụng</TableCell>
-                            <TableCell align="right">Tổng</TableCell>
+                            <TableCell>Danh muc</TableCell>
+                            <TableCell>Ten</TableCell>
+                            <TableCell>Ma</TableCell>
+                            <TableCell align="right">Kha dung</TableCell>
+                            <TableCell align="right">Tong</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
                           <TableRow>
-                            <TableCell>Kỹ thuật viên</TableCell>
-                            <TableCell>Kỹ thuật viên sẵn sàng</TableCell>
+                            <TableCell>Ky thuat vien</TableCell>
+                            <TableCell>Ky thuat vien san sang</TableCell>
                             <TableCell>-</TableCell>
                             <TableCell align="right">{availableTechs}</TableCell>
                             <TableCell align="right">{technicians.length}</TableCell>
                           </TableRow>
                           <TableRow>
-                            <TableCell>Phương tiện</TableCell>
-                            <TableCell>Nguồn phương tiện</TableCell>
+                            <TableCell>Phuong tien</TableCell>
+                            <TableCell>Nguon phuong tien</TableCell>
                             <TableCell>-</TableCell>
                             <TableCell align="right">{vehicleQty}</TableCell>
                             <TableCell align="right">{vehicleQty}</TableCell>
                           </TableRow>
                           {tools.map((tool) => (
                             <TableRow key={tool._id}>
-                              <TableCell>Công cụ</TableCell>
+                              <TableCell>Cong cu</TableCell>
                               <TableCell>{tool.name}</TableCell>
                               <TableCell>{tool.typeCode}</TableCell>
                               <TableCell align="right">{tool.availableQty}</TableCell>
@@ -1068,7 +1065,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           ))}
                           {licenses.map((lic) => (
                             <TableRow key={lic._id}>
-                              <TableCell>Công cụ phần mềm</TableCell>
+                              <TableCell>Cong cu phan mem</TableCell>
                               <TableCell>{lic.name}</TableCell>
                               <TableCell>{lic.typeCode}</TableCell>
                               <TableCell align="right">{lic.capTotal - lic.inUseNow}</TableCell>
@@ -1079,7 +1076,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                       </Table>
                     </Box>
                     <Button sx={{ mt: 2 }} variant="contained" onClick={handleOptimize} disabled={optimizing} fullWidth>
-                      Tối ưu điều phối ngay
+                      Toi uu dieu phoi ngay
                     </Button>
                   </CardContent>
                 </Card>
@@ -1087,7 +1084,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 <Card>
                   <CardContent>
                     <Typography variant="h6" gutterBottom>
-                      Thống kê sự cố
+                      Thong ke su co
                     </Typography>
                     <Stack spacing={1.5}>
                       {statusBuckets.map((bucket) => {
@@ -1117,12 +1114,12 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
                     <Divider sx={{ my: 2 }} />
                     <Typography variant="subtitle2" gutterBottom>
-                      Các loại sự cố nổi bật
+                      Cac loai su co noi bat
                     </Typography>
                     <Stack spacing={1.5}>
                       {typeData.length === 0 && (
                         <Typography variant="caption" color="text.secondary">
-                          Chưa ghi nhận sự cố.
+                          Chua ghi nhan su co.
                         </Typography>
                       )}
                       {typeData.map(([typeCode, count]) => (
@@ -1154,7 +1151,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               <Card sx={{ height: { xs: 420, md: 'calc(100vh - 220px)' }, minHeight: 420 }}>
                 <CardContent sx={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 1 }}>
                   <Typography variant="h6" gutterBottom>
-                    Bản đồ đơn vị
+                    Ban do don vi
                   </Typography>
                   <Box className="map-shell">
                     <MapContainer
@@ -1162,34 +1159,38 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                       zoom={companyUnitsMapInitial.zoom}
                       style={{ height: '100%', width: '100%' }}
                     >
-                      <TileLayer
-                        attribution={MAP_ATTRIBUTION}
-                        url={MAP_TILE_URL}
-                      />
+                      <TileLayer attribution={MAP_ATTRIBUTION} url={MAP_TILE_URL} />
                       <MapStatePersistence storageKey={companyUnitsMapKey} />
+
+                      {/* FIX: dung dispatchedIncidents thay vi onsiteDispatches,
+                          phan biet mau do (tai cho O) va xanh net dut (tu xa R) */}
                       {stationLocation &&
-                        onsiteDispatches.map((inc) => {
+                        dispatchedIncidents.map((inc) => {
                           const unit = unitById.get(inc.unitId)
-                          if (!unit?.location) {
-                            return null
-                          }
+                          if (!unit?.location) return null
                           const route = routeLines[inc._id] ?? [
                             [stationLocation.lat, stationLocation.lng],
                             [unit.location.lat, unit.location.lng]
                           ]
+                          const isOnsite = inc.dispatch?.mode === 'O'
                           return (
                             <Polyline
                               key={`route-${inc._id}`}
                               positions={route}
-                              color="#1976d2"
-                              weight={3}
+                              pathOptions={{
+                                color: isOnsite ? '#d32f2f' : '#1976d2',
+                                weight: 3,
+                                dashArray: isOnsite ? undefined : '10 6',
+                                opacity: 0.8
+                              }}
                             >
                               <Tooltip sticky>
-                                Điều phối tại chỗ: {inc.typeCode} → {unit.name}
+                                {isOnsite ? 'Tai cho' : 'Tu xa'}: {inc.typeCode} - {unit.name}
                               </Tooltip>
                             </Polyline>
                           )
                         })}
+
                       {units.map((unit) => (
                         <Fragment key={unit._id}>
                           {unit.activeIncidents && unit.activeIncidents > 0 && (
@@ -1199,35 +1200,36 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                               interactive={false}
                             />
                           )}
-                      <Marker
-                        position={[unit.location.lat, unit.location.lng]}
-                        icon={unit.isSupportStation ? supportStationIcon : DefaultIcon}
-                        eventHandlers={{ click: () => handleUnitMarkerClick(unit) }}
-                      >
-                        <Tooltip direction="top" offset={[0, -18]} permanent className="unit-label-tooltip">
-                          {unit.name}
-                        </Tooltip>
-                        <Popup>
-                          <Typography variant="subtitle2">{unit.name}</Typography>
-                          <Typography variant="caption" display="block">
-                            {unit.isSupportStation ? '🏠 Trạm ứng cứu' : `Sự cố đang hoạt động: ${unit.activeIncidents ?? 0}`}
-                          </Typography>
-                          {!unit.isSupportStation && (
-                            <Box mt={1}>
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color="info"
-                                fullWidth
-                                onClick={() => handleUnitMarkerClick(unit)}
-                              >
-                                Truy cập đơn vị
-                              </Button>
-                            </Box>
-                          )}
-                        </Popup>
-                      </Marker>
-
+                          <Marker
+                            position={[unit.location.lat, unit.location.lng]}
+                            icon={unit.isSupportStation ? supportStationIcon : DefaultIcon}
+                            eventHandlers={{ click: () => handleUnitMarkerClick(unit) }}
+                          >
+                            <Tooltip direction="top" offset={[0, -18]} permanent className="unit-label-tooltip">
+                              {unit.name}
+                            </Tooltip>
+                            <Popup>
+                              <Typography variant="subtitle2">{unit.name}</Typography>
+                              <Typography variant="caption" display="block">
+                                {unit.isSupportStation
+                                  ? 'Tram ung cuu'
+                                  : `Su co dang hoat dong: ${unit.activeIncidents ?? 0}`}
+                              </Typography>
+                              {!unit.isSupportStation && (
+                                <Box mt={1}>
+                                  <Button
+                                    size="small"
+                                    variant="contained"
+                                    color="info"
+                                    fullWidth
+                                    onClick={() => handleUnitMarkerClick(unit)}
+                                  >
+                                    Truy cap don vi
+                                  </Button>
+                                </Box>
+                              )}
+                            </Popup>
+                          </Marker>
                         </Fragment>
                       ))}
                     </MapContainer>
@@ -1240,15 +1242,15 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
           <Card>
             <CardContent>
               <Typography variant="h6" gutterBottom>
-                Lịch sử điều phối
+                Lich su dieu phoi
               </Typography>
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell />
-                    <TableCell>Thời điểm chạy</TableCell>
-                    <TableCell>Phân công</TableCell>
-                    <TableCell>Mục tiêu</TableCell>
+                    <TableCell>Thoi diem chay</TableCell>
+                    <TableCell>Phan cong</TableCell>
+                    <TableCell>Muc tieu</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1271,19 +1273,19 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <Collapse in={expandedRuns[run._id]} timeout="auto" unmountOnExit>
                             <Box sx={{ p: 2, backgroundColor: '#fafafa', borderRadius: 1 }}>
                               <Typography variant="subtitle2" gutterBottom>
-                                Nguồn lực đã điều phối
+                                Nguon luc da dieu phoi
                               </Typography>
                               <Table size="small">
                                 <TableHead>
                                   <TableRow>
-                                    <TableCell>Sự cố</TableCell>
-                                    <TableCell>Đơn vị</TableCell>
-                                    <TableCell>Kỹ thuật viên</TableCell>
-                                    <TableCell>Chế độ</TableCell>
-                                    <TableCell>Công cụ</TableCell>
-                                    <TableCell>Công cụ phần mềm</TableCell>
-                                    <TableCell>Phương tiện</TableCell>
-                                    <TableCell>Thời gian đến dự kiến (giờ)</TableCell>
+                                    <TableCell>Su co</TableCell>
+                                    <TableCell>Don vi</TableCell>
+                                    <TableCell>Ky thuat vien</TableCell>
+                                    <TableCell>Che do</TableCell>
+                                    <TableCell>Cong cu</TableCell>
+                                    <TableCell>Cong cu phan mem</TableCell>
+                                    <TableCell>Phuong tien</TableCell>
+                                    <TableCell>Thoi gian den du kien (gio)</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -1298,9 +1300,9 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                           {techNameById.get(assignment.technicianId) || assignment.technicianId}
                                         </TableCell>
                                         <TableCell>{assignment.mode}</TableCell>
-                                        <TableCell>{assignment.allocatedTools.join(', ') || 'Không có'}</TableCell>
-                                        <TableCell>{assignment.allocatedLicenses.join(', ') || 'Không có'}</TableCell>
-                                        <TableCell>{assignment.vehicleAllocated ? 'Có' : 'Không'}</TableCell>
+                                        <TableCell>{assignment.allocatedTools.join(', ') || 'Khong co'}</TableCell>
+                                        <TableCell>{assignment.allocatedLicenses.join(', ') || 'Khong co'}</TableCell>
+                                        <TableCell>{assignment.vehicleAllocated ? 'Co' : 'Khong'}</TableCell>
                                         <TableCell>{assignment.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
                                       </TableRow>
                                     )
@@ -1324,53 +1326,53 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
         <Card>
           <CardContent>
             <Typography variant="h6" gutterBottom>
-              Quản trị
+              Quan tri
             </Typography>
             <Tabs value={manageTab} onChange={(_, value) => setManageTab(value)} sx={{ mb: 2 }}>
-              <Tab label="Đơn vị" />
-              <Tab label="Kỹ thuật viên" />
-              <Tab label="Nguồn lực" />
-              <Tab label="Kỹ năng" />
-              <Tab label="Loại sự cố" />
+              <Tab label="Don vi" />
+              <Tab label="Ky thuat vien" />
+              <Tab label="Nguon luc" />
+              <Tab label="Ky nang" />
+              <Tab label="Loai su co" />
             </Tabs>
 
             {manageTab === 0 && (
               <Card variant="outlined">
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Đơn vị</Typography>
+                    <Typography variant="subtitle1">Don vi</Typography>
                     <Button variant="contained" size="small" onClick={openAddUnit}>
-                      Thêm đơn vị
+                      Them don vi
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Loại</TableCell>
-                        <TableCell>Địa chỉ</TableCell>
-                        <TableCell>Vĩ độ</TableCell>
-                        <TableCell>Kinh độ</TableCell>
-                        <TableCell>Truy cập từ xa</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Loai</TableCell>
+                        <TableCell>Dia chi</TableCell>
+                        <TableCell>Vi do</TableCell>
+                        <TableCell>Kinh do</TableCell>
+                        <TableCell>Truy cap tu xa</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {units.map((unit) => (
                         <TableRow key={unit._id}>
                           <TableCell>{unit.name}</TableCell>
-                          <TableCell>{unit.isSupportStation ? 'Trạm hỗ trợ' : 'Đơn vị'}</TableCell>
+                          <TableCell>{unit.isSupportStation ? 'Tram ho tro' : 'Don vi'}</TableCell>
                           <TableCell>{unit.location?.address || '-'}</TableCell>
                           <TableCell>{unit.location?.lat}</TableCell>
                           <TableCell>{unit.location?.lng}</TableCell>
-                          <TableCell>{unit.remoteAccessReady ? 'Có' : 'Không'}</TableCell>
+                          <TableCell>{unit.remoteAccessReady ? 'Co' : 'Khong'}</TableCell>
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button size="small" onClick={() => openEditUnit(unit)}>
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button size="small" color="error" onClick={() => openDeleteUnitDialog(unit)}>
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1386,21 +1388,21 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               <Card variant="outlined">
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Kỹ thuật viên</Typography>
+                    <Typography variant="subtitle1">Ky thuat vien</Typography>
                     <Button variant="contained" size="small" onClick={openAddTech} disabled={!stationReady}>
-                      Thêm kỹ thuật viên
+                      Them ky thuat vien
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Kỹ năng</TableCell>
-                        <TableCell>Sẵn sàng</TableCell>
-                        <TableCell>Vĩ độ cư trú</TableCell>
-                        <TableCell>Kinh độ cư trú</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Ky nang</TableCell>
+                        <TableCell>San sang</TableCell>
+                        <TableCell>Vi do cu tru</TableCell>
+                        <TableCell>Kinh do cu tru</TableCell>
                         <TableCell>dMatrix</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1408,7 +1410,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                         <TableRow key={tech._id}>
                           <TableCell>{tech.name}</TableCell>
                           <TableCell>{tech.skills.join(', ') || '-'}</TableCell>
-                          <TableCell>{tech.availableNow ? 'Có' : 'Không'}</TableCell>
+                          <TableCell>{tech.availableNow ? 'Co' : 'Khong'}</TableCell>
                           <TableCell>{stationLocation?.lat ?? tech.homeLocation?.lat ?? '-'}</TableCell>
                           <TableCell>{stationLocation?.lng ?? tech.homeLocation?.lng ?? '-'}</TableCell>
                           <TableCell>
@@ -1419,10 +1421,10 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button size="small" onClick={() => openEditTech(tech)}>
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button color="error" size="small" onClick={() => handleDeleteTech(tech._id)}>
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1438,18 +1440,18 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               <Card variant="outlined">
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Công cụ</Typography>
+                    <Typography variant="subtitle2">Cong cu</Typography>
                     <Button variant="contained" size="small" onClick={openAddTool}>
-                      Thêm công cụ
+                      Them cong cu
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Loại</TableCell>
-                        <TableCell>Số lượng khả dụng</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Loai</TableCell>
+                        <TableCell>So luong kha dung</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1461,10 +1463,10 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button size="small" onClick={() => openEditTool(tool)}>
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button size="small" color="error" onClick={() => handleDeleteTool(tool._id)}>
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1475,20 +1477,20 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
                   <Divider sx={{ my: 2 }} />
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Công cụ phần mềm</Typography>
+                    <Typography variant="subtitle2">Cong cu phan mem</Typography>
                     <Button variant="contained" size="small" onClick={openAddLicense}>
-                      Thêm công cụ phần mềm
+                      Them cong cu phan mem
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Loại</TableCell>
-                        <TableCell>Hạn mức</TableCell>
-                        <TableCell>Đang sử dụng</TableCell>
-                        <TableCell>Khả dụng</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Loai</TableCell>
+                        <TableCell>Han muc</TableCell>
+                        <TableCell>Dang su dung</TableCell>
+                        <TableCell>Kha dung</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1502,10 +1504,10 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button size="small" onClick={() => openEditLicense(lic)}>
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button size="small" color="error" onClick={() => handleDeleteLicense(lic._id)}>
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1516,31 +1518,31 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
                   <Divider sx={{ my: 2 }} />
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
-                    <Typography variant="subtitle2">Phương tiện</Typography>
+                    <Typography variant="subtitle2">Phuong tien</Typography>
                     <Button variant="contained" size="small" onClick={openAddVehicle}>
-                      Thêm phương tiện
+                      Them phuong tien
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Nguồn</TableCell>
-                        <TableCell>Số lượng khả dụng</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Nguon</TableCell>
+                        <TableCell>So luong kha dung</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
                       {vehicles.map((veh) => (
                         <TableRow key={veh._id}>
-                          <TableCell>Nguồn phương tiện</TableCell>
+                          <TableCell>Nguon phuong tien</TableCell>
                           <TableCell>{veh.availableQty}</TableCell>
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button size="small" onClick={() => openEditVehicle(veh)}>
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button size="small" color="error" onClick={() => handleDeleteVehicle(veh._id)}>
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1556,21 +1558,25 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               <Card variant="outlined">
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Kỹ năng</Typography>
-                    <Button variant="contained" size="small" onClick={() => {
-                      setSkillDialogMode('add')
-                      setEditingSkillId(null)
-                      setSkillForm({ name: '' })
-                      setSkillDialogOpen(true)
-                    }}>
-                      Thêm kỹ năng
+                    <Typography variant="subtitle1">Ky nang</Typography>
+                    <Button
+                      variant="contained"
+                      size="small"
+                      onClick={() => {
+                        setSkillDialogMode('add')
+                        setEditingSkillId(null)
+                        setSkillForm({ name: '' })
+                        setSkillDialogOpen(true)
+                      }}
+                    >
+                      Them ky nang
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1588,7 +1594,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                   setSkillDialogOpen(true)
                                 }}
                               >
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button
                                 size="small"
@@ -1598,7 +1604,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                   await load()
                                 }}
                               >
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1614,7 +1620,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               <Card variant="outlined">
                 <CardContent>
                   <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
-                    <Typography variant="subtitle1">Loại sự cố</Typography>
+                    <Typography variant="subtitle1">Loai su co</Typography>
                     <Button
                       variant="contained"
                       size="small"
@@ -1638,18 +1644,18 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                         setIncidentTypeDialogOpen(true)
                       }}
                     >
-                      Thêm loại
+                      Them loai
                     </Button>
                   </Stack>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
-                        <TableCell>Mã</TableCell>
-                        <TableCell>Tên</TableCell>
-                        <TableCell>Độ ưu tiên</TableCell>
-                        <TableCell>Khả thi từ xa</TableCell>
-                        <TableCell>Khả thi tại chỗ</TableCell>
-                        <TableCell>Thao tác</TableCell>
+                        <TableCell>Ma</TableCell>
+                        <TableCell>Ten</TableCell>
+                        <TableCell>Do uu tien</TableCell>
+                        <TableCell>Kha thi tu xa</TableCell>
+                        <TableCell>Kha thi tai cho</TableCell>
+                        <TableCell>Thao tac</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -1658,8 +1664,8 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                           <TableCell>{type.code}</TableCell>
                           <TableCell>{type.name}</TableCell>
                           <TableCell>{type.defaultPriority}</TableCell>
-                          <TableCell>{type.defaultFeasRemote ? 'Có' : 'Không'}</TableCell>
-                          <TableCell>{type.defaultFeasOnsite ? 'Có' : 'Không'}</TableCell>
+                          <TableCell>{type.defaultFeasRemote ? 'Co' : 'Khong'}</TableCell>
+                          <TableCell>{type.defaultFeasOnsite ? 'Co' : 'Khong'}</TableCell>
                           <TableCell>
                             <Stack direction="row" spacing={1}>
                               <Button
@@ -1684,7 +1690,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                   setIncidentTypeDialogOpen(true)
                                 }}
                               >
-                                Chỉnh sửa
+                                Chinh sua
                               </Button>
                               <Button
                                 size="small"
@@ -1694,7 +1700,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                                   await load()
                                 }}
                               >
-                                Xóa
+                                Xoa
                               </Button>
                             </Stack>
                           </TableCell>
@@ -1705,37 +1711,36 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 </CardContent>
               </Card>
             )}
-
           </CardContent>
         </Card>
       )}
 
       <Dialog open={unitDialogOpen} onClose={closeUnitDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{unitDialogMode === 'add' ? 'Thêm đơn vị' : 'Chỉnh sửa đơn vị'}</DialogTitle>
+        <DialogTitle>{unitDialogMode === 'add' ? 'Them don vi' : 'Chinh sua don vi'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Tên"
+              label="Ten"
               value={unitForm.name}
               onChange={(e) => setUnitForm((prev) => ({ ...prev, name: e.target.value }))}
               required
               fullWidth
             />
             <TextField
-              label="Địa chỉ"
+              label="Dia chi"
               value={unitForm.address}
               onChange={(e) => setUnitForm((prev) => ({ ...prev, address: e.target.value }))}
               fullWidth
             />
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Vĩ độ"
+                label="Vi do"
                 value={unitForm.lat}
                 onChange={(e) => setUnitForm((prev) => ({ ...prev, lat: e.target.value }))}
                 fullWidth
               />
               <TextField
-                label="Kinh độ"
+                label="Kinh do"
                 value={unitForm.lng}
                 onChange={(e) => setUnitForm((prev) => ({ ...prev, lng: e.target.value }))}
                 fullWidth
@@ -1753,94 +1758,75 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
               control={
                 <Switch
                   checked={unitForm.remoteAccessReady}
-                  onChange={(e) =>
-                    setUnitForm((prev) => ({ ...prev, remoteAccessReady: e.target.checked }))
-                  }
+                  onChange={(e) => setUnitForm((prev) => ({ ...prev, remoteAccessReady: e.target.checked }))}
                 />
               }
-              label="Sẵn sàng truy cập từ xa"
+              label="San sang truy cap tu xa"
             />
             <FormControlLabel
               control={
                 <Checkbox
                   checked={unitForm.isSupportStation}
-                  onChange={(e) =>
-                    setUnitForm((prev) => ({ ...prev, isSupportStation: e.target.checked }))
-                  }
+                  onChange={(e) => setUnitForm((prev) => ({ ...prev, isSupportStation: e.target.checked }))}
                   disabled={stationLocked && !unitForm.isSupportStation}
                 />
               }
-              label="Trạm hỗ trợ"
+              label="Tram ho tro"
             />
             {stationLocked && !unitForm.isSupportStation && (
               <Typography variant="caption" color="text.secondary">
-                Trạm hỗ trợ đã được thiết lập là {existingStation?.name}.
+                Tram ho tro da duoc thiet lap la {existingStation?.name}.
               </Typography>
             )}
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitUnit}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={closeUnitDialog}>Hủy</Button>
+              <Button onClick={closeUnitDialog}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
       </Dialog>
 
       <Dialog open={deleteUnitDialogOpen} onClose={closeDeleteUnitDialog} fullWidth maxWidth="xs">
-        <DialogTitle>Xác nhận xóa đơn vị</DialogTitle>
+        <DialogTitle>Xac nhan xoa don vi</DialogTitle>
         <DialogContent>
           <Stack spacing={1} sx={{ mt: 1 }}>
             <Typography>
-              Bạn có chắc chắn muốn xóa đơn vị <strong>{deleteUnitTarget?.name}</strong>?
+              Ban co chac chan muon xoa don vi <strong>{deleteUnitTarget?.name}</strong>?
             </Typography>
             <Typography variant="caption" color="text.secondary">
-              Hành động này không thể hoàn tác.
+              Hanh dong nay khong the hoan tac.
             </Typography>
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={closeDeleteUnitDialog}>Hủy</Button>
+          <Button onClick={closeDeleteUnitDialog}>Huy</Button>
           <Button color="error" variant="contained" onClick={handleConfirmDeleteUnit}>
-            Xóa
+            Xoa
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={techDialogOpen} onClose={closeTechDialog} fullWidth maxWidth="md">
-        <DialogTitle>{techDialogMode === 'add' ? 'Thêm kỹ thuật viên' : 'Chỉnh sửa kỹ thuật viên'}</DialogTitle>
+        <DialogTitle>{techDialogMode === 'add' ? 'Them ky thuat vien' : 'Chinh sua ky thuat vien'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Tên"
+              label="Ten"
               value={techForm.name}
               onChange={(e) => setTechForm((prev) => ({ ...prev, name: e.target.value }))}
               fullWidth
               required
             />
             <Stack direction="row" spacing={1}>
-              <TextField
-                label="Vĩ độ trạm hỗ trợ"
-                value={stationLocation?.lat ?? ''}
-                fullWidth
-                disabled
-              />
-              <TextField
-                label="Kinh độ trạm hỗ trợ"
-                value={stationLocation?.lng ?? ''}
-                fullWidth
-                disabled
-              />
+              <TextField label="Vi do tram ho tro" value={stationLocation?.lat ?? ''} fullWidth disabled />
+              <TextField label="Kinh do tram ho tro" value={stationLocation?.lng ?? ''} fullWidth disabled />
             </Stack>
-            <TextField
-              label="Địa chỉ trạm hỗ trợ"
-              value={stationLocation?.address ?? ''}
-              fullWidth
-              disabled
-            />
+            <TextField label="Dia chi tram ho tro" value={stationLocation?.address ?? ''} fullWidth disabled />
             {!stationReady && (
               <Typography variant="caption" color="error">
-                Vui lòng thiết lập đơn vị trạm hỗ trợ trước khi thêm kỹ thuật viên.
+                Vui long thiet lap don vi tram ho tro truoc khi them ky thuat vien.
               </Typography>
             )}
             <FormControlLabel
@@ -1850,15 +1836,15 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                   onChange={(e) => setTechForm((prev) => ({ ...prev, availableNow: e.target.checked }))}
                 />
               }
-              label="Sẵn sàng hiện tại"
+              label="San sang hien tai"
             />
             <FormControl fullWidth>
-              <InputLabel id="tech-skills-label">Kỹ năng</InputLabel>
+              <InputLabel id="tech-skills-label">Ky nang</InputLabel>
               <Select
                 labelId="tech-skills-label"
                 multiple
                 value={techForm.skills}
-                label="Kỹ năng"
+                label="Ky nang"
                 renderValue={(selected) => (selected as string[]).join(', ')}
                 onChange={(event) =>
                   setTechForm((prev) => ({ ...prev, skills: event.target.value as string[] }))
@@ -1872,13 +1858,13 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 ))}
               </Select>
             </FormControl>
-            <Typography variant="subtitle2">dMatrix (theo loại sự cố)</Typography>
+            <Typography variant="subtitle2">dMatrix (theo loai su co)</Typography>
             <Stack spacing={1}>
               {techForm.dMatrixRows.map((row, idx) => (
                 <Stack direction="row" spacing={1} key={`${row.typeCode}-${idx}`}>
                   <TextField
                     select
-                    label="Loại sự cố"
+                    label="Loai su co"
                     value={row.typeCode}
                     onChange={(e) =>
                       setTechForm((prev) => ({
@@ -1898,7 +1884,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                   </TextField>
                   <TextField
                     select
-                    label="Chế độ"
+                    label="Che do"
                     value={row.mode}
                     onChange={(e) =>
                       setTechForm((prev) => ({
@@ -1910,11 +1896,11 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                     }
                     sx={{ width: 120 }}
                   >
-                    <MenuItem value="R">Từ xa</MenuItem>
-                    <MenuItem value="O">Tại chỗ</MenuItem>
+                    <MenuItem value="R">Tu xa</MenuItem>
+                    <MenuItem value="O">Tai cho</MenuItem>
                   </TextField>
                   <TextField
-                    label="Thời lượng (giờ)"
+                    label="Thoi luong (gio)"
                     type="number"
                     value={row.durationHours}
                     onChange={(e) =>
@@ -1937,7 +1923,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                       }))
                     }
                   >
-                    Loại bỏ
+                    Loai bo
                   </Button>
                 </Stack>
               ))}
@@ -1950,37 +1936,37 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                   }))
                 }
               >
-                Thêm dòng dMatrix
+                Them dong dMatrix
               </Button>
             </Stack>
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitTech} disabled={!stationReady}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={closeTechDialog}>Hủy</Button>
+              <Button onClick={closeTechDialog}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
       </Dialog>
 
       <Dialog open={toolDialogOpen} onClose={closeToolDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{toolDialogMode === 'add' ? 'Thêm công cụ' : 'Chỉnh sửa công cụ'}</DialogTitle>
+        <DialogTitle>{toolDialogMode === 'add' ? 'Them cong cu' : 'Chinh sua cong cu'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Tên"
+              label="Ten"
               value={toolForm.name}
               onChange={(e) => setToolForm((prev) => ({ ...prev, name: e.target.value }))}
               fullWidth
             />
             <TextField
-              label="Mã loại"
+              label="Ma loai"
               value={toolForm.typeCode}
               onChange={(e) => setToolForm((prev) => ({ ...prev, typeCode: e.target.value }))}
               fullWidth
             />
             <TextField
-              label="Số lượng khả dụng"
+              label="So luong kha dung"
               type="number"
               value={toolForm.availableQty}
               onChange={(e) => setToolForm((prev) => ({ ...prev, availableQty: Number(e.target.value) }))}
@@ -1988,9 +1974,9 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             />
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitTool}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={closeToolDialog}>Hủy</Button>
+              <Button onClick={closeToolDialog}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
@@ -1998,32 +1984,32 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
       <Dialog open={licenseDialogOpen} onClose={closeLicenseDialog} fullWidth maxWidth="sm">
         <DialogTitle>
-          {licenseDialogMode === 'add' ? 'Thêm công cụ phần mềm' : 'Chỉnh sửa công cụ phần mềm'}
+          {licenseDialogMode === 'add' ? 'Them cong cu phan mem' : 'Chinh sua cong cu phan mem'}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Tên"
+              label="Ten"
               value={licenseForm.name}
               onChange={(e) => setLicenseForm((prev) => ({ ...prev, name: e.target.value }))}
               fullWidth
             />
             <TextField
-              label="Mã loại"
+              label="Ma loai"
               value={licenseForm.typeCode}
               onChange={(e) => setLicenseForm((prev) => ({ ...prev, typeCode: e.target.value }))}
               fullWidth
             />
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Tổng hạn mức"
+                label="Tong han muc"
                 type="number"
                 value={licenseForm.capTotal}
                 onChange={(e) => setLicenseForm((prev) => ({ ...prev, capTotal: Number(e.target.value) }))}
                 fullWidth
               />
               <TextField
-                label="Đang sử dụng"
+                label="Dang su dung"
                 type="number"
                 value={licenseForm.inUseNow}
                 onChange={(e) => setLicenseForm((prev) => ({ ...prev, inUseNow: Number(e.target.value) }))}
@@ -2032,20 +2018,20 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             </Stack>
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitLicense}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={closeLicenseDialog}>Hủy</Button>
+              <Button onClick={closeLicenseDialog}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
       </Dialog>
 
       <Dialog open={vehicleDialogOpen} onClose={closeVehicleDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{vehicleDialogMode === 'add' ? 'Thêm phương tiện' : 'Chỉnh sửa phương tiện'}</DialogTitle>
+        <DialogTitle>{vehicleDialogMode === 'add' ? 'Them phuong tien' : 'Chinh sua phuong tien'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Số lượng khả dụng"
+              label="So luong kha dung"
               type="number"
               value={vehicleForm.availableQty}
               onChange={(e) => setVehicleForm({ availableQty: Number(e.target.value) })}
@@ -2053,29 +2039,29 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             />
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitVehicle}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={closeVehicleDialog}>Hủy</Button>
+              <Button onClick={closeVehicleDialog}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
       </Dialog>
 
       <Dialog open={skillDialogOpen} onClose={() => setSkillDialogOpen(false)} fullWidth maxWidth="sm">
-        <DialogTitle>{skillDialogMode === 'add' ? 'Thêm kỹ năng' : 'Chỉnh sửa kỹ năng'}</DialogTitle>
+        <DialogTitle>{skillDialogMode === 'add' ? 'Them ky nang' : 'Chinh sua ky nang'}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
-              label="Tên kỹ năng"
+              label="Ten ky nang"
               value={skillForm.name}
               onChange={(e) => setSkillForm({ name: e.target.value })}
               fullWidth
             />
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitSkill}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={() => setSkillDialogOpen(false)}>Hủy</Button>
+              <Button onClick={() => setSkillDialogOpen(false)}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
@@ -2087,16 +2073,16 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
         fullWidth
         maxWidth="md"
       >
-        <DialogTitle>Yêu cầu sự cố</DialogTitle>
+        <DialogTitle>Yeu cau su co</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <FormControl fullWidth>
-              <InputLabel id="req-skills-label">Kỹ năng bắt buộc</InputLabel>
+              <InputLabel id="req-skills-label">Ky nang bat buoc</InputLabel>
               <Select
                 labelId="req-skills-label"
                 multiple
                 value={requirementsForm.requiredSkills}
-                label="Kỹ năng bắt buộc"
+                label="Ky nang bat buoc"
                 renderValue={(selected) => (selected as string[]).join(', ')}
                 onChange={(event) =>
                   setRequirementsForm((prev) => ({ ...prev, requiredSkills: event.target.value as string[] }))
@@ -2113,12 +2099,12 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
             <Stack direction="row" spacing={1}>
               <FormControl fullWidth>
-                <InputLabel id="req-tools-r-label">Công cụ (từ xa)</InputLabel>
+                <InputLabel id="req-tools-r-label">Cong cu (tu xa)</InputLabel>
                 <Select
                   labelId="req-tools-r-label"
                   multiple
                   value={requirementsForm.toolsR}
-                  label="Công cụ (từ xa)"
+                  label="Cong cu (tu xa)"
                   renderValue={(selected) => (selected as string[]).join(', ')}
                   onChange={(event) =>
                     setRequirementsForm((prev) => ({ ...prev, toolsR: event.target.value as string[] }))
@@ -2133,12 +2119,12 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 </Select>
               </FormControl>
               <FormControl fullWidth>
-                <InputLabel id="req-tools-o-label">Công cụ (tại chỗ)</InputLabel>
+                <InputLabel id="req-tools-o-label">Cong cu (tai cho)</InputLabel>
                 <Select
                   labelId="req-tools-o-label"
                   multiple
                   value={requirementsForm.toolsO}
-                  label="Công cụ (tại chỗ)"
+                  label="Cong cu (tai cho)"
                   renderValue={(selected) => (selected as string[]).join(', ')}
                   onChange={(event) =>
                     setRequirementsForm((prev) => ({ ...prev, toolsO: event.target.value as string[] }))
@@ -2156,12 +2142,12 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
             <Stack direction="row" spacing={1}>
               <FormControl fullWidth>
-                <InputLabel id="req-licenses-r-label">Công cụ phần mềm (từ xa)</InputLabel>
+                <InputLabel id="req-licenses-r-label">Cong cu phan mem (tu xa)</InputLabel>
                 <Select
                   labelId="req-licenses-r-label"
                   multiple
                   value={requirementsForm.licensesR}
-                  label="Công cụ phần mềm (từ xa)"
+                  label="Cong cu phan mem (tu xa)"
                   renderValue={(selected) => (selected as string[]).join(', ')}
                   onChange={(event) =>
                     setRequirementsForm((prev) => ({ ...prev, licensesR: event.target.value as string[] }))
@@ -2176,12 +2162,12 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 </Select>
               </FormControl>
               <FormControl fullWidth>
-                <InputLabel id="req-licenses-o-label">Công cụ phần mềm (tại chỗ)</InputLabel>
+                <InputLabel id="req-licenses-o-label">Cong cu phan mem (tai cho)</InputLabel>
                 <Select
                   labelId="req-licenses-o-label"
                   multiple
                   value={requirementsForm.licensesO}
-                  label="Công cụ phần mềm (tại chỗ)"
+                  label="Cong cu phan mem (tai cho)"
                   renderValue={(selected) => (selected as string[]).join(', ')}
                   onChange={(event) =>
                     setRequirementsForm((prev) => ({ ...prev, licensesO: event.target.value as string[] }))
@@ -2206,14 +2192,14 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                   }
                 />
               }
-              label="Yêu cầu phương tiện khi tại chỗ"
+              label="Yeu cau phuong tien khi tai cho"
             />
 
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSaveRequirements}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={() => setRequirementsDialogOpen(false)}>Hủy</Button>
+              <Button onClick={() => setRequirementsDialogOpen(false)}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
@@ -2221,20 +2207,20 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
       <Dialog open={incidentTypeDialogOpen} onClose={() => setIncidentTypeDialogOpen(false)} fullWidth maxWidth="md">
         <DialogTitle>
-          {incidentTypeDialogMode === 'add' ? 'Thêm loại sự cố' : 'Chỉnh sửa loại sự cố'}
+          {incidentTypeDialogMode === 'add' ? 'Them loai su co' : 'Chinh sua loai su co'}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Mã"
+                label="Ma"
                 value={incidentTypeForm.code}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, code: e.target.value }))}
                 fullWidth
                 disabled={incidentTypeDialogMode === 'edit'}
               />
               <TextField
-                label="Tên"
+                label="Ten"
                 value={incidentTypeForm.name}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, name: e.target.value }))}
                 fullWidth
@@ -2242,7 +2228,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             </Stack>
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Độ ưu tiên mặc định"
+                label="Do uu tien mac dinh"
                 type="number"
                 value={incidentTypeForm.defaultPriority}
                 onChange={(e) =>
@@ -2251,7 +2237,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 fullWidth
               />
               <TextField
-                label="Thời gian thiết lập từ xa mặc định (giờ)"
+                label="Thoi gian thiet lap tu xa mac dinh (gio)"
                 type="number"
                 value={incidentTypeForm.defaultSetupRemote}
                 onChange={(e) =>
@@ -2270,7 +2256,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                     }
                   />
                 }
-                label="Khả thi từ xa"
+                label="Kha thi tu xa"
               />
               <FormControlLabel
                 control={
@@ -2281,16 +2267,16 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                     }
                   />
                 }
-                label="Khả thi tại chỗ"
+                label="Kha thi tai cho"
               />
             </Stack>
             <FormControl fullWidth>
-              <InputLabel id="incident-required-skills-label">Kỹ năng bắt buộc</InputLabel>
+              <InputLabel id="incident-required-skills-label">Ky nang bat buoc</InputLabel>
               <Select
                 labelId="incident-required-skills-label"
                 multiple
                 value={incidentTypeForm.requiredSkills}
-                label="Kỹ năng bắt buộc"
+                label="Ky nang bat buoc"
                 renderValue={(selected) => (selected as string[]).join(', ')}
                 onChange={(event) =>
                   setIncidentTypeForm((prev) => ({ ...prev, requiredSkills: event.target.value as string[] }))
@@ -2306,13 +2292,13 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             </FormControl>
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Công cụ (từ xa)"
+                label="Cong cu (tu xa)"
                 value={incidentTypeForm.toolsR}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, toolsR: e.target.value }))}
                 fullWidth
               />
               <TextField
-                label="Công cụ (tại chỗ)"
+                label="Cong cu (tai cho)"
                 value={incidentTypeForm.toolsO}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, toolsO: e.target.value }))}
                 fullWidth
@@ -2320,13 +2306,13 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             </Stack>
             <Stack direction="row" spacing={1}>
               <TextField
-                label="Công cụ phần mềm (từ xa)"
+                label="Cong cu phan mem (tu xa)"
                 value={incidentTypeForm.licensesR}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, licensesR: e.target.value }))}
                 fullWidth
               />
               <TextField
-                label="Công cụ phần mềm (tại chỗ)"
+                label="Cong cu phan mem (tai cho)"
                 value={incidentTypeForm.licensesO}
                 onChange={(e) => setIncidentTypeForm((prev) => ({ ...prev, licensesO: e.target.value }))}
                 fullWidth
@@ -2341,36 +2327,36 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                   }
                 />
               }
-              label="Yêu cầu phương tiện khi tại chỗ"
+              label="Yeu cau phuong tien khi tai cho"
             />
             <Stack direction="row" spacing={1}>
               <Button variant="contained" onClick={handleSubmitIncidentType}>
-                Lưu
+                Luu
               </Button>
-              <Button onClick={() => setIncidentTypeDialogOpen(false)}>Hủy</Button>
+              <Button onClick={() => setIncidentTypeDialogOpen(false)}>Huy</Button>
             </Stack>
           </Stack>
         </DialogContent>
       </Dialog>
 
       <Dialog open={Boolean(result)} onClose={() => setResult(null)} fullWidth maxWidth="md">
-        <DialogTitle>Kết quả tối ưu hóa</DialogTitle>
+        <DialogTitle>Ket qua toi uu hoa</DialogTitle>
         <DialogContent>
           {result && (
             <Stack spacing={2}>
               <Typography variant="body2">
-                Mục tiêu: Z1={result.objectives.Z1}, Z2={result.objectives.Z2}, Z3={result.objectives.Z3}
+                Muc tieu: Z1={result.objectives.Z1}, Z2={result.objectives.Z2}, Z3={result.objectives.Z3}
               </Typography>
-              <Typography variant="subtitle2">Sự cố đã điều phối</Typography>
+              <Typography variant="subtitle2">Su co da dieu phoi</Typography>
               <Box sx={{ overflowX: 'auto' }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Sự cố</TableCell>
-                      <TableCell>Kỹ thuật viên</TableCell>
-                      <TableCell>Chế độ</TableCell>
-                      <TableCell>Nguồn lực</TableCell>
-                      <TableCell>Thời gian (giờ)</TableCell>
+                      <TableCell>Su co</TableCell>
+                      <TableCell>Ky thuat vien</TableCell>
+                      <TableCell>Che do</TableCell>
+                      <TableCell>Nguon luc</TableCell>
+                      <TableCell>Thoi gian (gio)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -2380,7 +2366,8 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                         <TableCell>{a.technicianId}</TableCell>
                         <TableCell>{a.mode}</TableCell>
                         <TableCell>
-                          Công cụ: {a.allocatedTools.join(', ') || 'Không có'} | Công cụ phần mềm: {a.allocatedLicenses.join(', ') || 'Không có'}
+                          Cong cu: {a.allocatedTools.join(', ') || 'Khong co'} | Cong cu phan mem:{' '}
+                          {a.allocatedLicenses.join(', ') || 'Khong co'}
                         </TableCell>
                         <TableCell>{a.timeToRestoreEstimateHours.toFixed(2)}</TableCell>
                       </TableRow>
@@ -2389,7 +2376,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                       <TableRow>
                         <TableCell colSpan={5}>
                           <Typography variant="caption" color="text.secondary">
-                            Không có sự cố nào được điều phối trong lần chạy này.
+                            Khong co su co nao duoc dieu phoi trong lan chay nay.
                           </Typography>
                         </TableCell>
                       </TableRow>
@@ -2398,14 +2385,14 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                 </Table>
               </Box>
 
-              <Typography variant="subtitle2">Chưa được điều phối</Typography>
+              <Typography variant="subtitle2">Chua duoc dieu phoi</Typography>
               <Box sx={{ overflowX: 'auto' }}>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Sự cố</TableCell>
-                      <TableCell>Độ ưu tiên</TableCell>
-                      <TableCell>Lý do</TableCell>
+                      <TableCell>Su co</TableCell>
+                      <TableCell>Do uu tien</TableCell>
+                      <TableCell>Ly do</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -2428,7 +2415,7 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
                       <TableRow>
                         <TableCell colSpan={3}>
                           <Typography variant="caption" color="text.secondary">
-                            Tất cả các sự cố ứng viên đều đã được điều phối.
+                            Tat ca cac su co ung vien deu da duoc dieu phoi.
                           </Typography>
                         </TableCell>
                       </TableRow>
@@ -2439,13 +2426,14 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
 
               <Stack direction="row" justifyContent="flex-end">
                 <Button variant="contained" onClick={() => setResult(null)}>
-                  Xác nhận
+                  Xac nhan
                 </Button>
               </Stack>
             </Stack>
           )}
         </DialogContent>
       </Dialog>
+
       <Dialog
         open={Boolean(unitAccessDialogUnit)}
         onClose={() => setUnitAccessDialogUnit(null)}
@@ -2453,21 +2441,21 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
         fullWidth
       >
         <DialogTitle>
-          🏢 Truy cập đơn vị: <b>{unitAccessDialogUnit?.name}</b>
+          Truy cap don vi: <b>{unitAccessDialogUnit?.name}</b>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">
-              Chọn chế độ truy cập cho đơn vị này:
+              Chon che do truy cap cho don vi nay:
             </Typography>
             {unitAccessDialogUnit?.location?.address && (
               <Typography variant="caption" color="text.secondary">
-                📍 {unitAccessDialogUnit.location.address}
+                Dia chi: {unitAccessDialogUnit.location.address}
               </Typography>
             )}
             {(unitAccessDialogUnit?.activeIncidents ?? 0) > 0 && (
               <Alert severity="warning" sx={{ py: 0.5 }}>
-                Đang có {unitAccessDialogUnit?.activeIncidents} sự cố chưa giải quyết
+                Dang co {unitAccessDialogUnit?.activeIncidents} su co chua giai quyet
               </Alert>
             )}
           </Stack>
@@ -2479,23 +2467,22 @@ const [unitPortalUnit, setUnitPortalUnit] = useState<Unit | null>(null)
             fullWidth
             onClick={() => handleConfirmUnitAccess('unit')}
           >
-            🏢 Vào giao diện Đơn vị (Diễn tập)
+            Vao giao dien Don vi (Dien tap)
           </Button>
-          <Button
-            fullWidth
-            onClick={() => setUnitAccessDialogUnit(null)}
-          >
-            Hủy
+          <Button fullWidth onClick={() => setUnitAccessDialogUnit(null)}>
+            Huy
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* ════ Unit Portal toàn màn hình ════ */}
       {unitPortalUnit && (
         <UnitPortal
           unit={{ ...unitPortalUnit, _id: unitPortalUnit._id ?? (unitPortalUnit as any).id ?? '' }}
           companyId={user.companyId}
-          onClose={() => { setUnitPortalUnit(null); load() }}
+          onClose={() => {
+            setUnitPortalUnit(null)
+            load()
+          }}
         />
       )}
     </Stack>
