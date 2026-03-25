@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Optional                         
 from pydantic import BaseModel, Field
 
 from app.models.common import ModeFeas, Requirements, IncidentStatus, DispatchInfo
@@ -19,9 +18,10 @@ class IncidentBase(BaseModel):
 
 
 class IncidentCreate(BaseModel):
-    typeCode: str                                     
-    componentId: Optional[str] = None
-    notes: Optional[str] = None
+    unitId: str                        # ← THÊM
+    componentId: str | None = None     # ← đổi thành optional
+    typeCode: str
+    notes: str | None = None           # ← THÊM
 
 
 class IncidentUpdate(BaseModel):

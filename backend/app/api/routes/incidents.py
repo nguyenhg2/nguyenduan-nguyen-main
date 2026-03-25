@@ -7,23 +7,17 @@ from app.models.common import Role, IncidentStatus
 from app.models.incident import IncidentCreate, IncidentInDB, IncidentUpdate
 
 router = APIRouter()
-
 @router.post("/incidents", response_model=IncidentInDB)
 async def create_incident(
     payload: IncidentCreate,
-    user: dict = Depends(get_current_user), 
+    user: dict = Depends(get_current_user),   # ← không cần require_role
 ):
     db = get_db()
-    
-    if user["role"] == Role.UNIT_USER.value:
-        if payload.unitId != user.get("unitId"):
-            raise HTTPException(status_code=403, detail="Cannot create incident for another unit")
-    elif user["role"] == Role.COMPANY_ADMIN.value:
-        unit = await db.units.find_one({"_id": oid(payload.unitId), "companyId": user["companyId"]})
-        if not unit:
-            raise HTTPException(status_code=404, detail="Unit not found in your company")
-    else:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    # Tạm bỏ chia quyền — chỉ kiểm tra unit thuộc company của user
+    unit = await db.units.find_one({"_id": oid(payload.unitId), "companyId": user["companyId"]})
+    if not unit:
+        raise HTTPException(status_code=404, detail="Unit not found in your company")
 
     type_doc = await db.incident_types.find_one({"code": payload.typeCode})
     if not type_doc:
@@ -31,10 +25,6 @@ async def create_incident(
 
     priority = type_doc.get("defaultPriority", 1)
     setup_remote = type_doc.get("defaultSetupRemote", 0.5)
-
-    unit = await db.units.find_one({"_id": oid(payload.unitId)})
-    if not unit:
-        raise HTTPException(status_code=404, detail="Unit not found")
 
     if payload.componentId:
         component = await db.components.find_one(
@@ -59,7 +49,7 @@ async def create_incident(
         "modeFeas": mode_feas,
         "setupRemote": setup_remote,
         "requirements": type_doc.get("requirements", {}),
-        "notes": payload.notes,
+        "notes": payload.notes,          # ← giờ field này tồn tại
     }
 
     result = await db.incidents.insert_one(doc)

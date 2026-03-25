@@ -10,7 +10,7 @@ app = FastAPI(title="Incident Response Dispatch")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origin_list,    
+    allow_origins=["http://localhost:5173"],   # đúng cổng frontend
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -100,27 +100,24 @@ export default function UnitPortal({ unit, companyId, onClose }: Props) {
     }
   }
 
-  const handleSubmitIncident = async () => {
-    if (!selectedTypeId || !autoPriority) return
-    setSubmitting(true)
+ const handleSubmitIncident = async () => {
+    if (!selectedTypeId || !autoPriority) return;
+    setSubmitting(true);
     try {
-      await api.post('/api/incidents', {
-        unitId,
-        companyId,
-        typeCode: selectedType!.code,
-        componentId: selectedCompId || undefined,
-        priority: autoPriority,
-        notes: incNotes,
-         status: 'OPEN',
-      })
-      setSelectedTypeId('')
-      setSelectedCompId('')
-      setIncNotes('')
-      await load()
+        await api.post('/api/incidents', {
+            unitId,
+            typeCode: selectedType!.code,
+            componentId: selectedCompId || undefined,
+            notes: incNotes,
+        });
+        setSelectedTypeId('');
+        setSelectedCompId('');
+        setIncNotes('');
+        await load();
     } finally {
-      setSubmitting(false)
+        setSubmitting(false);
     }
-  }
+};
 
   const handleOpenAddComp = () => {
     setEditingComp({ ...EMPTY_COMP })
