@@ -8,6 +8,12 @@ services:
       - "27017:27017"
     volumes:
       - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   osrm:
     image: osrm/osrm-backend:latest
@@ -57,7 +63,8 @@ services:
     ports:
       - "8000:8000"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy   # ← chờ mongo ping được mới start
 
   frontend:
     build: ./frontend
@@ -72,13 +79,14 @@ services:
   seed:
     build: ./backend
     container_name: incident_seed
-    command: ["/bin/sh", "-c", "sleep 2 && python -m app.seed.seed_data"]
+    command: ["/bin/sh", "-c", "sleep 5 && python -m app.seed.seed_data"]
     environment:
       - MONGODB_URI=mongodb://mongo:27017
       - MONGODB_DB=incident_response
       - JWT_SECRET=dev-secret
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy   
     profiles:
       - seed
 

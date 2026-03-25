@@ -14,7 +14,6 @@ async def create_incident(
 ):
     db = get_db()
 
-    # Tạm bỏ chia quyền — chỉ kiểm tra unit thuộc company của user
     unit = await db.units.find_one({"_id": oid(payload.unitId), "companyId": user["companyId"]})
     if not unit:
         raise HTTPException(status_code=404, detail="Unit not found in your company")

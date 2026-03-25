@@ -7,7 +7,7 @@ from app.models.common import ModeFeas, Requirements, IncidentStatus, DispatchIn
 class IncidentBase(BaseModel):
     companyId: str
     unitId: str
-    componentId: str
+    componentId: str | None = None
     typeCode: str
     priority: int
     status: IncidentStatus
@@ -18,10 +18,10 @@ class IncidentBase(BaseModel):
 
 
 class IncidentCreate(BaseModel):
-    unitId: str                        # ← THÊM
-    componentId: str | None = None     # ← đổi thành optional
+    unitId: str                     # ← THÊM
+    componentId: str | None = None  # ← optional
     typeCode: str
-    notes: str | None = None           # ← THÊM
+    notes: str | None = None        # ← THÊM
 
 
 class IncidentUpdate(BaseModel):
@@ -35,5 +35,6 @@ class IncidentUpdate(BaseModel):
 class IncidentInDB(IncidentBase):
     id: str = Field(alias="_id")
     dispatch: DispatchInfo | None = None
+    notes: str | None = None        
 
     model_config = {"populate_by_name": True}
